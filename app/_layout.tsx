@@ -20,10 +20,16 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
-        <Stack.Screen name="todo" />
-        {/* <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" /> */}
-      </Stack>
+  {/* Tabs layout (e.g. index.tsx inside (tabs)) */}
+  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+
+  {/* Standalone screens */}
+  <Stack.Screen name="menu" />
+  <Stack.Screen name="register" />
+
+  {/* Optional: 404 fallback */}
+  <Stack.Screen name="+not-found" />
+</Stack>
       <StatusBar style="auto" />
     </ThemeProvider>
   );

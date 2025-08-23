@@ -10,17 +10,17 @@ import {
   TouchableOpacity,
 } from 'react-native';
 
-export default function Index() {
+export default function Register() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
 
-  async function handleLogin() {
+  async function handleRegister() {
     try {
-      await auth().signInWithEmailAndPassword(email, password);
-      setMessage('Logged in successfully!');
-      router.replace('/menu'); // ✅ Navigate to menu.tsx
+      await auth().createUserWithEmailAndPassword(email, password);
+      setMessage('Account created successfully!');
+      setTimeout(() => router.replace('/'), 1500); // Navigate to login after short delay
     } catch (error: any) {
       setMessage(error.message);
     }
@@ -31,8 +31,8 @@ export default function Index() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <Text style={styles.title}>Welcome</Text>
-      <Text style={styles.subtitle}>Sign in or create an account</Text>
+      <Text style={styles.title}>Create Account</Text>
+      <Text style={styles.subtitle}>Sign up to get started</Text>
 
       <TextInput
         style={styles.input}
@@ -55,15 +55,16 @@ export default function Index() {
 
       {message ? <Text style={styles.message}>{message}</Text> : null}
 
-      <TouchableOpacity style={styles.button} onPress={handleLogin}>
-        <Text style={styles.buttonText}>Login</Text>
+      <TouchableOpacity style={styles.button} onPress={handleRegister}>
+        <Text style={styles.buttonText}>Register</Text>
       </TouchableOpacity>
 
+      {/* Navigate back to login */}
       <TouchableOpacity
         style={[styles.button, styles.secondaryButton]}
-        onPress={() => router.push('/register')}
+        onPress={() => router.replace('/')}
       >
-        <Text style={[styles.buttonText, styles.secondaryButtonText]}>Register</Text>
+        <Text style={[styles.buttonText, styles.secondaryButtonText]}>Back to Login</Text>
       </TouchableOpacity>
     </KeyboardAvoidingView>
   );

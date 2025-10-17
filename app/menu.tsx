@@ -1,391 +1,465 @@
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import {
-    Alert,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
-} from 'react-native';
+import auth from "@react-native-firebase/auth";
+import firestore from "@react-native-firebase/firestore";
+import { useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
+import { ActivityIndicator, Image, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { signOut } from "../services/authService";
+
+interface Memory {
+  id: string;
+  description: string;
+  imageUrl: string;
+  createdAt: any;
+  albumName?: string;
+}
 
 export default function Menu() {
   const router = useRouter();
-  const [itemName, setItemName] = useState('');
-  const [itemDescription, setItemDescription] = useState('');
-  const [itemTag, setItemTag] = useState('');
-  const [message, setMessage] = useState('');
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [items, setItems] = useState<any[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [userName, setUserName] = useState("User");
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showDropdown, setShowDropdown] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = auth().onAuthStateChanged(user => {
-      if (user) {
-        setUserEmail(user.email);
-
-        firestore()
-          .collection('items')
-          .where('createdBy.uid', '==', user.uid)
-          .onSnapshot(snapshot => {
-            const userItems = snapshot?.docs?.map(doc => ({
-              id: doc.id,
-              ...doc.data(),
-            })) ?? [];
-            setItems(userItems);
-          });
-      } else {
-        router.replace('/');
-      }
-    });
-
-    return unsubscribe;
-  }, []);
-
-  function openFormForEdit(item: any) {
-    setItemName(item.name);
-    setItemDescription(item.description);
-    setItemTag(item.tag);
-    setEditingItemId(item.id);
-    setShowForm(true);
-  }
-
-  async function handleSubmit() {
-    if (!itemName || !itemDescription || !itemTag) {
-      setMessage('Please fill out all fields.');
+    const user = auth().currentUser;
+    
+    // Don't do anything if no user is logged in
+    if (!user) {
+      setLoading(false);
       return;
     }
+    
+    if (user?.displayName) {
+      setUserName(user.displayName);
+    } else if (user?.email) {
+      setUserName(user.email.split('@')[0]);
+    }
 
-    const currentUser = auth().currentUser;
-
-    try {
-      if (editingItemId) {
-        await firestore().collection('items').doc(editingItemId).update({
-          name: itemName,
-          description: itemDescription,
-          tag: itemTag,
-        });
-        setMessage(`Item "${itemName}" updated successfully!`);
-      } else {
-        await firestore().collection('items').add({
-          name: itemName,
-          description: itemDescription,
-          tag: itemTag,
-          createdBy: {
-            uid: currentUser?.uid,
-            email: currentUser?.email,
-          },
-          createdAt: firestore.FieldValue.serverTimestamp(),
-        });
-        setMessage(`Item "${itemName}" submitted successfully!`);
+    // Subscribe to user's memories
+    const unsubscribe = loadUserMemories();
+    
+    // Cleanup listener when component unmounts
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
       }
+    };
+  }, []);
 
-      setItemName('');
-      setItemDescription('');
-      setItemTag('');
-      setEditingItemId(null);
-      setShowForm(false);
-    } catch (error: any) {
-      setMessage(`Error: ${error.message}`);
+  const loadUserMemories = () => {
+    const user = auth().currentUser;
+    if (!user) {
+      setLoading(false);
+      return () => {}; // Return empty cleanup function
     }
-  }
 
-  function confirmDelete(itemId: string) {
-    Alert.alert(
-      'Delete Item',
-      'Are you sure you want to delete this item?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => handleDelete(itemId),
+    const unsubscribe = firestore()
+      .collection("memories")
+      .where("createdBy", "==", user.uid)
+      .orderBy("createdAt", "desc")
+      .limit(10)
+      .onSnapshot(
+        (snapshot) => {
+          const fetchedMemories = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          })) as Memory[];
+          setMemories(fetchedMemories);
+          setLoading(false);
         },
-      ],
-      { cancelable: true }
-    );
-  }
+        (error) => {
+          console.error("Error loading memories:", error);
+          setLoading(false);
+        }
+      );
 
-  async function handleDelete(itemId: string) {
-    try {
-      await firestore().collection('items').doc(itemId).delete();
-    } catch (error: any) {
-      Alert.alert('Error', error.message);
-    }
-  }
+    return unsubscribe;
+  };
+
+  const formatTimeAgo = (timestamp: any) => {
+    if (!timestamp) return "Just now";
+    
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    const now = new Date();
+    const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (seconds < 60) return "Just now";
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+    if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`;
+    
+    return date.toLocaleDateString();
+  };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.subtitle}>Logged in as {userEmail}</Text>
-
-        <TouchableOpacity style={styles.addBox} onPress={() => setShowForm(true)}>
-          <Text style={styles.plusIcon}>＋</Text>
-          <Text style={styles.addText}>Add Item</Text>
-        </TouchableOpacity>
-
-        <Modal
-          visible={showForm}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setShowForm(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>
-                {editingItemId ? 'Edit Item' : 'Add New Item'}
-              </Text>
-
-              <TextInput
-                style={styles.input}
-                placeholder="Item Name"
-                placeholderTextColor="#888"
-                value={itemName}
-                onChangeText={setItemName}
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="Item Description"
-                placeholderTextColor="#888"
-                value={itemDescription}
-                onChangeText={setItemDescription}
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="Item Tag"
-                placeholderTextColor="#888"
-                value={itemTag}
-                onChangeText={setItemTag}
-              />
-
-              {message ? <Text style={styles.message}>{message}</Text> : null}
-
-              <TouchableOpacity style={styles.button} onPress={handleSubmit}>
-                <Text style={styles.buttonText}>
-                  {editingItemId ? 'Update' : 'Submit'}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.button, styles.secondaryButton]}
-                onPress={() => {
-                  setShowForm(false);
-                  setEditingItemId(null);
-                  setItemName('');
-                  setItemDescription('');
-                  setItemTag('');
-                  setMessage('');
-                }}
-              >
-                <Text style={[styles.buttonText, styles.secondaryButtonText]}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
+    <>
+      <StatusBar barStyle="light-content" backgroundColor="#7C3AED" />
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.appName}>Memories</Text>
+          <View style={styles.headerIcons}>
+            <TouchableOpacity style={styles.iconButton}>
+              <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.iconButton}
+              onPress={() => setShowDropdown(!showDropdown)}
+            >
+              <Ionicons name="menu" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
           </View>
-        </Modal>
 
-        <Text style={styles.sectionTitle}>Your Items</Text>
-        {items.length === 0 ? (
-          <Text style={styles.noItems}>No items submitted yet.</Text>
-        ) : (
-          <View style={styles.itemsContainer}>
-            {items.map(item => (
-              <View key={item.id} style={styles.itemCard}>
-                <Text style={styles.itemName}>{item.name}</Text>
-                <Text style={styles.itemDescription}>{item.description}</Text>
-                <Text style={styles.itemTag}>#{item.tag}</Text>
-
-                <View style={styles.cardActions}>
-                  <TouchableOpacity
-                    style={styles.cardButton}
-                    onPress={() => openFormForEdit(item)}
-                  >
-                    <Text style={styles.cardButtonText}>Edit</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.cardButton, styles.deleteButton]}
-                    onPress={() => confirmDelete(item.id)}
-                  >
-                    <Text style={[styles.cardButtonText, styles.deleteButtonText]}>
-                      Delete
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+          {/* Dropdown Menu */}
+          {showDropdown && (
+            <>
+              <TouchableOpacity 
+                style={styles.dropdownOverlay}
+                activeOpacity={1}
+                onPress={() => setShowDropdown(false)}
+              />
+              <View style={styles.dropdownMenu}>
+                <TouchableOpacity 
+                  style={styles.dropdownItem}
+                  onPress={() => {
+                    setShowDropdown(false);
+                    router.push("/profile");
+                  }}
+                >
+                  <Icon name="account-outline" size={20} color="#111827" style={styles.dropdownIcon} />
+                  <Text style={styles.dropdownText}>Profile</Text>
+                </TouchableOpacity>
+                
+                <View style={styles.dropdownDivider} />
+                
+                <TouchableOpacity 
+                  style={styles.dropdownItem}
+                  onPress={async () => {
+                    setShowDropdown(false);
+                    await signOut();
+                    router.replace("/");
+                  }}
+                >
+                  <Icon name="logout" size={20} color="#DC2626" style={styles.dropdownIcon} />
+                  <Text style={[styles.dropdownText, styles.logoutText]}>Logout</Text>
+                </TouchableOpacity>
               </View>
-            ))}
-          </View>
-        )}
+            </>
+          )}
+        </View>
 
-        <TouchableOpacity
-          style={[styles.button, styles.logoutButton]}
-          onPress={() => auth().signOut().then(() => router.replace('/'))}
-        >
-          <Text style={styles.buttonText}>Logout</Text>
-        </TouchableOpacity>
+        {/* Greeting Card */}
+        <View style={styles.greetingCard}>
+          <Text style={styles.greeting}>Hi, {userName}</Text>
+          <Text style={styles.tagline}>
+            Your memories matter. Let's keep writing them together.
+          </Text>
+
+          {/* Action Buttons */}
+          <View style={styles.actionButtons}>
+            <TouchableOpacity 
+              style={styles.actionCard}
+              onPress={() => router.push("/addMemory")}
+            >
+              <View style={styles.actionIcon}>
+                <Icon name="plus-circle" size={32} color="#EF4444" />
+              </View>
+              <Text style={styles.actionLabel}>Create a memory</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.actionCard}
+              onPress={() => router.push("/albums")}
+            >
+              <View style={[styles.actionIcon, styles.actionIconSecondary]}>
+                <Icon name="book-multiple" size={32} color="#3B82F6" />
+              </View>
+              <Text style={styles.actionLabel}>Albums</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.actionCard}
+              onPress={() => router.push("/calendar")}
+            >
+              <View style={[styles.actionIcon, styles.actionIconTertiary]}>
+                <Icon name="calendar" size={32} color="#6B7280" />
+              </View>
+              <Text style={styles.actionLabel}>View Calendar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Recent Memories Feed */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Recent Memories</Text>
+          
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#7C3AED" />
+            </View>
+          ) : memories.length === 0 ? (
+            <TouchableOpacity 
+              style={styles.emptyCard}
+              onPress={() => router.push("/addMemory")}
+            >
+              <Icon name="image-outline" size={48} color="#9CA3AF" style={styles.emptyIcon} />
+              <Text style={styles.emptyTitle}>No memories yet</Text>
+              <Text style={styles.emptySubtitle}>Tap to create your first memory</Text>
+            </TouchableOpacity>
+          ) : (
+            memories.map((memory) => (
+              <TouchableOpacity 
+                key={memory.id}
+                style={styles.memoryCard}
+                onPress={() => router.push(`/memories?albumId=${memory.albumName || 'uncategorized'}`)}
+              >
+                <Image 
+                  source={{ uri: memory.imageUrl }} 
+                  style={styles.memoryImage}
+                  resizeMode="cover"
+                />
+                <View style={styles.memoryContent}>
+                  <View style={styles.memoryHeader}>
+                    <Text style={styles.memoryTime}>{formatTimeAgo(memory.createdAt)}</Text>
+                    {memory.albumName && (
+                      <View style={styles.albumBadge}>
+                        <Text style={styles.albumBadgeText}>{memory.albumName}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.memoryDescription} numberOfLines={2}>
+                    {memory.description || "Untitled memory"}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
+
+        <View style={styles.bottomPadding} />
       </ScrollView>
-    </KeyboardAvoidingView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  scrollContent: { padding: 20, paddingBottom: 40 },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  addBox: {
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: '#0077b6',
-    borderRadius: 12,
-    padding: 30,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  plusIcon: {
-    fontSize: 32,
-    color: '#0077b6',
-    marginBottom: 5,
-  },
-  addText: {
-    fontSize: 16,
-    color: '#0077b6',
-    fontWeight: '600',
-  },
-  modalOverlay: {
+  container: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#FAF5FF",
   },
-  modalContent: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 12,
-    width: '90%',
-    maxWidth: 400,
-    elevation: 5,
+  header: {
+    backgroundColor: "#7C3AED",
+    paddingTop: 50,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 15,
-    textAlign: 'center',
+  appName: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#FFFFFF",
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 15,
-    fontSize: 16,
-    color: '#333',
-  },
-  message: {
-    color: '#0077b6',
-    textAlign: 'center',
-    marginBottom: 15,
-  },
-   button: {
-    backgroundColor: '#0077b6',
-    padding: 15,
-    borderRadius: 8,
-    marginBottom: 10,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  secondaryButton: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#0077b6',
-  },
-  secondaryButtonText: {
-    color: '#0077b6',
-  },
-  logoutButton: {
-    marginTop: 30,
-    backgroundColor: '#e63946',
-  },
-  sectionTitle: {
-    fontSize: 22,
-    fontWeight: '600',
-    marginBottom: 10,
-    color: '#333',
-  },
-  noItems: {
-    textAlign: 'center',
-    color: '#999',
-    fontStyle: 'italic',
-  },
-  itemsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
+  headerIcons: {
+    flexDirection: "row",
     gap: 12,
   },
-  itemCard: {
-    backgroundColor: '#f1f1f1',
-    padding: 15,
+  iconButton: {
+    width: 36,
+    height: 36,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  dropdownOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: -1000,
+    backgroundColor: "transparent",
+    zIndex: 1,
+  },
+  dropdownMenu: {
+    position: "absolute",
+    top: 70,
+    right: 20,
+    backgroundColor: "#FFFFFF",
     borderRadius: 12,
-    marginBottom: 12,
-    width: '48%',
-    minHeight: 140,
-    justifyContent: 'space-between',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    minWidth: 180,
+    zIndex: 2,
+    overflow: "hidden",
   },
-  itemName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#222',
+  dropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
   },
-  itemDescription: {
-    fontSize: 14,
-    color: '#555',
-    marginTop: 4,
+  dropdownIcon: {
+    marginRight: 12,
   },
-  itemTag: {
+  dropdownText: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#111827",
+  },
+  logoutText: {
+    color: "#DC2626",
+  },
+  dropdownDivider: {
+    height: 1,
+    backgroundColor: "#E5E7EB",
+    marginHorizontal: 12,
+  },
+  greetingCard: {
+    backgroundColor: "#FFFFFF",
+    marginHorizontal: 20,
+    marginTop: -10,
+    borderRadius: 16,
+    padding: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  greeting: {
+    fontSize: 26,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 8,
+  },
+  tagline: {
+    fontSize: 15,
+    color: "#6B7280",
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  actionButtons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  actionCard: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 16,
+  },
+  actionIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: "#FEE2E2",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  actionIconSecondary: {
+    backgroundColor: "#DBEAFE",
+  },
+  actionIconTertiary: {
+    backgroundColor: "#E5E7EB",
+  },
+  actionLabel: {
     fontSize: 12,
-    color: '#0077b6',
-    marginTop: 4,
-    fontWeight: '500',
+    color: "#6B7280",
+    textAlign: "center",
+    fontWeight: "500",
   },
-  cardActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 12,
+  section: {
+    marginTop: 32,
+    paddingHorizontal: 20,
   },
-  cardButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    backgroundColor: '#0077b6',
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 16,
   },
-  cardButtonText: {
-    color: '#fff',
+  loadingContainer: {
+    paddingVertical: 40,
+    alignItems: "center",
+  },
+  emptyCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 40,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  emptyIcon: {
+    marginBottom: 12,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#111827",
+    marginBottom: 4,
+  },
+  emptySubtitle: {
     fontSize: 14,
-    fontWeight: '500',
+    color: "#9CA3AF",
   },
-  deleteButton: {
-    backgroundColor: '#e63946',
+  memoryCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    marginBottom: 16,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  deleteButtonText: {
-    color: '#fff',
+  memoryImage: {
+    width: "100%",
+    height: 220,
+    backgroundColor: "#F3F4F6",
+  },
+  memoryContent: {
+    padding: 16,
+  },
+  memoryHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  memoryTime: {
+    fontSize: 13,
+    color: "#9CA3AF",
+    fontWeight: "500",
+  },
+  albumBadge: {
+    backgroundColor: "#EDE9FE",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  albumBadgeText: {
+    fontSize: 11,
+    color: "#7C3AED",
+    fontWeight: "600",
+  },
+  memoryDescription: {
+    fontSize: 16,
+    color: "#111827",
+    fontWeight: "500",
+    lineHeight: 22,
+  },
+  bottomPadding: {
+    height: 40,
   },
 });

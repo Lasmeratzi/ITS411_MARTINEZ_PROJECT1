@@ -1,6 +1,7 @@
-import auth from '@react-native-firebase/auth';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
+import { signUp } from "../services/authService";
+
 import {
   KeyboardAvoidingView,
   Platform,
@@ -18,9 +19,9 @@ export default function Register() {
 
   async function handleRegister() {
     try {
-      await auth().createUserWithEmailAndPassword(email, password);
+      await signUp(email, password);
       setMessage('Account created successfully!');
-      setTimeout(() => router.replace('/'), 1500); // Navigate to login after short delay
+      setTimeout(() => router.replace('/'), 1500); 
     } catch (error: any) {
       setMessage(error.message);
     }

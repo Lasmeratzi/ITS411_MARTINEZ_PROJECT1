@@ -1,6 +1,29 @@
-import { Redirect } from 'expo-router';
+import { HapticTab } from '@/components/HapticTab';
+import { IconSymbol } from '@/components/ui/IconSymbol';
+import TabBarBackground from '@/components/ui/TabBarBackground';
+import { Colors } from '@/constants/Colors';
+import { useColorScheme } from '@/hooks/useColorScheme';
+import { Tabs } from 'expo-router';
 
 export default function TabLayout() {
-  // Redirect tabs to menu since we're not using the tab structure
-  return <Redirect href="/menu" />;
+  const colorScheme = useColorScheme();
+  
+  return (
+    <Tabs
+      screenOptions={{
+        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        headerShown: false,
+        tabBarButton: HapticTab,
+        tabBarBackground: TabBarBackground,
+        tabBarStyle: { display: 'none' }, // Hide tab bar if you don't want tabs
+      }}>
+      <Tabs.Screen
+        name="index" // This should be your login screen
+        options={{
+          title: 'Login',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+        }}
+      />
+    </Tabs>
+  );
 }

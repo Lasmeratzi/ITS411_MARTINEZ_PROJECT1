@@ -2,18 +2,35 @@ import auth from "@react-native-firebase/auth";
 import firestore from "@react-native-firebase/firestore";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Image, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Image, Modal, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { createRegularAlbum } from "../services/albumsService"; // NEW: Import album service
 import { signOut } from "../services/authService";
 
 interface Memory {
   id: string;
+  title?: string;
   description: string;
   imageUrl: string;
   createdAt: any;
+  date?: string;
   albumName?: string;
 }
+
+// NEW: Color options for albums
+const COLOR_OPTIONS = [
+  "#FF9A8B", // Original pink
+  "#7C3AED", // Purple
+  "#3B82F6", // Blue
+  "#10B981", // Green
+  "#F59E0B", // Amber
+  "#EF4444", // Red
+  "#8B5CF6", // Violet
+  "#06B6D4", // Cyan
+  "#84CC16", // Lime
+  "#F97316", // Orange
+];
 
 export default function Menu() {
   const router = useRouter();
@@ -21,6 +38,16 @@ export default function Menu() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDropdown, setShowDropdown] = useState(false);
+  
+  // State for memory details modal
+  const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null);
+  const [showMemoryDetails, setShowMemoryDetails] = useState(false);
+
+  // NEW: State for album creation
+  const [showAlbumForm, setShowAlbumForm] = useState(false);
+  const [albumTitle, setAlbumTitle] = useState("");
+  const [albumDescription, setAlbumDescription] = useState("");
+  const [selectedColor, setSelectedColor] = useState(COLOR_OPTIONS[0]);
 
   useEffect(() => {
     const user = auth().currentUser;
@@ -78,6 +105,32 @@ export default function Menu() {
     return unsubscribe;
   };
 
+  // NEW: Function to create album
+  const handleCreateAlbum = async () => {
+    if (!albumTitle.trim()) {
+      alert("Please enter an album title");
+      return;
+    }
+
+    try {
+      await createRegularAlbum(
+        albumTitle.trim(),
+        albumDescription.trim(),
+        selectedColor
+      );
+      
+      // Reset form
+      setAlbumTitle("");
+      setAlbumDescription("");
+      setSelectedColor(COLOR_OPTIONS[0]);
+      setShowAlbumForm(false);
+      
+      alert("Album created successfully!");
+    } catch (error: any) {
+      alert("Error creating album: " + error.message);
+    }
+  };
+
   const formatTimeAgo = (timestamp: any) => {
     if (!timestamp) return "Just now";
     
@@ -91,6 +144,26 @@ export default function Menu() {
     if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`;
     
     return date.toLocaleDateString();
+  };
+
+  // Date formatting function (same as in memories.tsx)
+  const formatDisplayDate = (dateString: string) => {
+    if (!dateString) return "No date";
+    
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return "Invalid date";
+      }
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    } catch (error) {
+      console.error("Error formatting date:", error);
+      return "Date not available";
+    }
   };
 
   return (
@@ -130,6 +203,18 @@ export default function Menu() {
                 >
                   <Icon name="account-outline" size={20} color="#111827" style={styles.dropdownIcon} />
                   <Text style={styles.dropdownText}>Profile</Text>
+                </TouchableOpacity>
+                
+                {/* NEW: Create Album Option */}
+                <TouchableOpacity 
+                  style={styles.dropdownItem}
+                  onPress={() => {
+                    setShowDropdown(false);
+                    setShowAlbumForm(true);
+                  }}
+                >
+                  <Icon name="folder-plus" size={20} color="#111827" style={styles.dropdownIcon} />
+                  <Text style={styles.dropdownText}>Create Album</Text>
                 </TouchableOpacity>
                 
                 <View style={styles.dropdownDivider} />
@@ -213,7 +298,10 @@ export default function Menu() {
               <TouchableOpacity 
                 key={memory.id}
                 style={styles.memoryCard}
-                onPress={() => router.push(`/memories?albumId=${memory.albumName || 'uncategorized'}`)}
+                onPress={() => {
+                  setSelectedMemory(memory);
+                  setShowMemoryDetails(true);
+                }}
               >
                 <Image 
                   source={{ uri: memory.imageUrl }} 
@@ -230,7 +318,7 @@ export default function Menu() {
                     )}
                   </View>
                   <Text style={styles.memoryDescription} numberOfLines={2}>
-                    {memory.description || "Untitled memory"}
+                    {memory.title || memory.description || "Untitled memory"}
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -239,6 +327,153 @@ export default function Menu() {
         </View>
 
         <View style={styles.bottomPadding} />
+
+        {/* Memory Details Modal */}
+        <Modal visible={showMemoryDetails} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, styles.detailModalContent]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Memory Details</Text>
+                <TouchableOpacity
+                  onPress={() => setShowMemoryDetails(false)}
+                >
+                  <Icon name="close" size={24} color="#6B7280" />
+                </TouchableOpacity>
+              </View>
+
+              {selectedMemory && (
+                <>
+                  {/* Memory Image */}
+                  <Image 
+                    source={{ uri: selectedMemory.imageUrl }} 
+                    style={styles.detailImage}
+                    resizeMode="cover"
+                  />
+                  
+                  {/* Memory Title */}
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailLabel}>Title</Text>
+                    <Text style={styles.detailTitle}>{selectedMemory.title || selectedMemory.description || "Untitled memory"}</Text>
+                  </View>
+
+                  {/* Memory Date */}
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailLabel}>Date</Text>
+                    <View style={styles.dateRow}>
+                      <Icon name="calendar" size={16} color="#6B7280" />
+                      <Text style={styles.detailDate}>
+                        {selectedMemory.date ? formatDisplayDate(selectedMemory.date) : "No date set"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Memory Description */}
+                  {selectedMemory.description && (
+                    <View style={styles.detailSection}>
+                      <Text style={styles.detailLabel}>Description</Text>
+                      <Text style={styles.detailDescription}>
+                        {selectedMemory.description}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Close Button */}
+                  <TouchableOpacity 
+                    style={styles.closeDetailButton} 
+                    onPress={() => setShowMemoryDetails(false)}
+                  >
+                    <Text style={styles.closeDetailText}>Close</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </View>
+        </Modal>
+
+        {/* NEW: Album Creation Modal */}
+        <Modal visible={showAlbumForm} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Create New Album</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowAlbumForm(false);
+                    setAlbumTitle("");
+                    setAlbumDescription("");
+                    setSelectedColor(COLOR_OPTIONS[0]);
+                  }}
+                >
+                  <Icon name="close" size={24} color="#6B7280" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Album Title</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter album name"
+                  placeholderTextColor="#9CA3AF"
+                  value={albumTitle}
+                  onChangeText={setAlbumTitle}
+                />
+              </View>
+
+              {/* Description Input */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Description (Optional)</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder="Enter album description"
+                  placeholderTextColor="#9CA3AF"
+                  value={albumDescription}
+                  onChangeText={setAlbumDescription}
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              {/* Color Picker */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Album Color</Text>
+                <View style={styles.colorGrid}>
+                  {COLOR_OPTIONS.map((color) => (
+                    <TouchableOpacity
+                      key={color}
+                      style={[
+                        styles.colorOption,
+                        { backgroundColor: color },
+                        selectedColor === color && styles.colorOptionSelected,
+                      ]}
+                      onPress={() => setSelectedColor(color)}
+                    >
+                      {selectedColor === color && (
+                        <Icon name="check" size={16} color="#FFFFFF" />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <TouchableOpacity style={styles.submitButton} onPress={handleCreateAlbum}>
+                <Text style={styles.submitButtonText}>Create Album</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.cancelModalButton}
+                onPress={() => {
+                  setShowAlbumForm(false);
+                  setAlbumTitle("");
+                  setAlbumDescription("");
+                  setSelectedColor(COLOR_OPTIONS[0]);
+                }}
+              >
+                <Text style={styles.cancelModalText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </ScrollView>
     </>
   );
@@ -461,5 +696,161 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 40,
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 24,
+    width: "100%",
+    maxWidth: 400,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  detailModalContent: {
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 24,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  detailImage: {
+    width: '100%',
+    height: 250,
+    borderRadius: 12,
+    marginBottom: 20,
+  },
+  detailSection: {
+    marginBottom: 20,
+  },
+  detailLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#6B7280",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  detailTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#111827",
+    lineHeight: 28,
+  },
+  dateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  detailDate: {
+    fontSize: 16,
+    color: "#7C3AED",
+    fontWeight: "600",
+  },
+  detailDescription: {
+    fontSize: 16,
+    color: "#374151",
+    lineHeight: 24,
+  },
+  closeDetailButton: {
+    backgroundColor: "#7C3AED",
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: "center",
+    marginTop: 8,
+  },
+  closeDetailText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  // NEW: Album Form Styles
+  inputGroup: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#374151",
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: "#F9FAFB",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 15,
+    color: "#111827",
+  },
+  textArea: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  colorGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+  },
+  colorOption: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  colorOptionSelected: {
+    borderColor: "#111827",
+    transform: [{ scale: 1.1 }],
+  },
+  submitButton: {
+    backgroundColor: "#7C3AED",
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: "center",
+    marginTop: 8,
+    shadowColor: "#7C3AED",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  submitButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  cancelModalButton: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 12,
+  },
+  cancelModalText: {
+    color: "#6B7280",
+    fontSize: 16,
+    fontWeight: "600",
   },
 });

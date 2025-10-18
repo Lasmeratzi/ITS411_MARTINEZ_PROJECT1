@@ -1,3 +1,4 @@
+import DateTimePicker from '@react-native-community/datetimepicker';
 import auth from "@react-native-firebase/auth";
 import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
@@ -30,12 +31,30 @@ export default function Memories() {
   const [memories, setMemories] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [image, setImage] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [memoryDate, setMemoryDate] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [albumTitle, setAlbumTitle] = useState("Memories");
+  
+  // NEW: State for memory details modal
+  const [selectedMemory, setSelectedMemory] = useState<any>(null);
+  const [showMemoryDetails, setShowMemoryDetails] = useState(false);
 
-  useEffect(() => {
+   useEffect(() => {
     const unsubscribe = subscribeToUserMemories(setMemories, albumId);
     return () => unsubscribe();
+  }, [albumId]);
+
+  // ADD THIS RIGHT HERE - after the existing useEffect:
+  useEffect(() => {
+    if (albumId) {
+      // You could fetch album details here if needed
+      // For now, we'll just update the header title
+      setAlbumTitle("Album Memories");
+    } else {
+      setAlbumTitle("Memories"); // Reset to default if no albumId
+    }
   }, [albumId]);
 
   const pickImage = async () => {
@@ -61,7 +80,6 @@ export default function Memories() {
       const user = auth().currentUser;
       if (!user) throw new Error("User not authenticated");
 
-      // Create memories directory if it doesn't exist
       const memoriesDir = `${FileSystem.documentDirectory}memories/`;
       const dirInfo = await FileSystem.getInfoAsync(memoriesDir);
       
@@ -69,11 +87,9 @@ export default function Memories() {
         await FileSystem.makeDirectoryAsync(memoriesDir, { intermediates: true });
       }
 
-      // Generate unique filename
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
       const localUri = `${memoriesDir}${fileName}`;
 
-      // Copy image to local storage
       await FileSystem.copyAsync({
         from: uri,
         to: localUri,
@@ -87,21 +103,34 @@ export default function Memories() {
     }
   };
 
+  // UPDATED: handleSaveMemory function
   const handleSaveMemory = async () => {
     if (!image) {
       Alert.alert("Error", "Please select an image.");
       return;
     }
+    
+    if (!title.trim()) {
+      Alert.alert("Error", "Please enter a memory title.");
+      return;
+    }
 
     try {
-      // Save image to device local storage
       const localUri = await saveImageLocally(image);
+      const formattedDate = memoryDate.toISOString().split('T')[0];
 
-      // Save memory with local file path to Firestore
-      await createMemory(description || "Untitled memory", localUri, albumId || null);
+      await createMemory(
+        title.trim(), 
+        description || "", 
+        localUri, 
+        albumId || null, 
+        formattedDate
+      );
 
-      setImage(null);
+      setTitle("");
       setDescription("");
+      setImage(null);
+      setMemoryDate(new Date());
       setShowForm(false);
       Alert.alert("Success", "Memory saved!");
 
@@ -111,18 +140,62 @@ export default function Memories() {
     }
   };
 
-  const renderItem = ({ item }: { item: any }) => (
-    <TouchableOpacity style={styles.imageWrapper}>
-      <Image source={{ uri: item.imageUrl }} style={styles.image} />
-      {item.description && (
+  // NEW: Function to handle memory click
+  const handleMemoryPress = (memory: any) => {
+    setSelectedMemory(memory);
+    setShowMemoryDetails(true);
+  };
+
+  // UPDATED: renderItem function with click handler
+  // In your renderItem, add extra safety:
+const renderItem = ({ item }: { item: any }) => {
+  // Safety check
+  if (!item) return null;
+  
+  return (
+    <TouchableOpacity 
+      style={styles.imageWrapper}
+      onPress={() => handleMemoryPress(item)}
+    >
+      <Image 
+        source={{ uri: item.imageUrl || '' }} 
+        style={styles.image} 
+      />
+      {item.title ? (
         <View style={styles.imageOverlay}>
           <Text style={styles.imageDescription} numberOfLines={2}>
-            {item.description}
+            {item.title}
           </Text>
         </View>
-      )}
+      ) : null}
     </TouchableOpacity>
   );
+};
+
+  // NEW: Format date for display
+  // UPDATED: Fix date formatting function
+const formatDisplayDate = (dateString: string) => {
+  if (!dateString) return "No date";
+  
+  try {
+    // Handle both formats: "2022-10-17" and "2022-10-17T00:00:00.000Z"
+    const date = new Date(dateString);
+    
+    // Check if date is valid
+    if (isNaN(date.getTime())) {
+      return "Invalid date";
+    }
+    
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  } catch (error) {
+    console.error("Error formatting date:", error);
+    return "Date not available";
+  }
+};
 
   return (
     <>
@@ -130,24 +203,27 @@ export default function Memories() {
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Memories</Text>
-          <View style={styles.placeholder} />
-        </View>
+  <TouchableOpacity 
+    style={styles.backButton}
+    onPress={() => router.back()}
+  >
+    <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+  </TouchableOpacity>
+  <Text style={styles.headerTitle}>{albumTitle}</Text> {/* UPDATED: Use dynamic title */}
+  <View style={styles.placeholder} />
+</View>
 
-        <View style={styles.content}>
-          {/* Info Card */}
-          <View style={styles.infoCard}>
-            <Text style={styles.infoTitle}>Memories</Text>
-            <Text style={styles.infoSubtitle}>
-              A collection of moments attached together for a better memory, and the feelings those shared.
-            </Text>
-          </View>
+<View style={styles.content}>
+  {/* Info Card */}
+  <View style={styles.infoCard}>
+    <Text style={styles.infoTitle}>{albumTitle}</Text> {/* UPDATED: Use dynamic title */}
+    <Text style={styles.infoSubtitle}>
+      {albumId 
+        ? "Memories collected in this album, attached together for a better memory."
+        : "A collection of moments attached together for a better memory, and the feelings those shared."
+      }
+    </Text>
+  </View>
 
           {/* Add Memory Button */}
           <TouchableOpacity 
@@ -188,7 +264,7 @@ export default function Memories() {
           </TouchableOpacity>
         </View>
 
-        {/* Modal Form */}
+        {/* Modal Form for Creating Memory */}
         <Modal visible={showForm} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
@@ -198,7 +274,9 @@ export default function Memories() {
                   onPress={() => {
                     setShowForm(false);
                     setImage(null);
+                    setTitle("");
                     setDescription("");
+                    setMemoryDate(new Date());
                   }}
                 >
                   <Icon name="close" size={24} color="#6B7280" />
@@ -216,6 +294,32 @@ export default function Memories() {
                   </View>
                 )}
               </TouchableOpacity>
+
+              {/* Title Input */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Memory Title *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Give your memory a title"
+                  placeholderTextColor="#9CA3AF"
+                  value={title}
+                  onChangeText={setTitle}
+                />
+              </View>
+
+              {/* Date Picker */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>When did this happen?</Text>
+                <TouchableOpacity 
+                  style={styles.datePickerButton}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <Text style={styles.datePickerText}>
+                    {memoryDate.toLocaleDateString()}
+                  </Text>
+                  <Icon name="calendar" size={20} color="#6B7280" />
+                </TouchableOpacity>
+              </View>
 
               {/* Description Input */}
               <View style={styles.inputGroup}>
@@ -241,11 +345,100 @@ export default function Memories() {
                 onPress={() => {
                   setShowForm(false);
                   setImage(null);
+                  setTitle("");
                   setDescription("");
+                  setMemoryDate(new Date());
                 }}
               >
                 <Text style={styles.cancelModalText}>Cancel</Text>
               </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Date Picker Modal */}
+        <Modal visible={showDatePicker} transparent animationType="slide">
+          <View style={styles.datePickerOverlay}>
+            <View style={styles.datePickerContainer}>
+              <View style={styles.datePickerHeader}>
+                <Text style={styles.datePickerTitle}>Select Date</Text>
+                <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                  <Text style={styles.datePickerDone}>Done</Text>
+                </TouchableOpacity>
+              </View>
+              <DateTimePicker
+                value={memoryDate}
+                mode="date"
+                display="spinner"
+                onChange={(event, selectedDate) => {
+                  setShowDatePicker(false);
+                  if (selectedDate) {
+                    setMemoryDate(selectedDate);
+                  }
+                }}
+              />
+            </View>
+          </View>
+        </Modal>
+
+        {/* NEW: Memory Details Modal */}
+        <Modal visible={showMemoryDetails} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, styles.detailModalContent]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Memory Details</Text>
+                <TouchableOpacity
+                  onPress={() => setShowMemoryDetails(false)}
+                >
+                  <Icon name="close" size={24} color="#6B7280" />
+                </TouchableOpacity>
+              </View>
+
+              {selectedMemory && (
+                <>
+                  {/* Memory Image */}
+                  <Image 
+                    source={{ uri: selectedMemory.imageUrl }} 
+                    style={styles.detailImage}
+                    resizeMode="cover"
+                  />
+                  
+                  {/* Memory Title */}
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailLabel}>Title</Text>
+                    <Text style={styles.detailTitle}>{selectedMemory.title}</Text>
+                  </View>
+
+                  {/* Memory Date */}
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailLabel}>Date</Text>
+                    <View style={styles.dateRow}>
+                      <Icon name="calendar" size={16} color="#6B7280" />
+                      <Text style={styles.detailDate}>
+                        {formatDisplayDate(selectedMemory.date)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Memory Description */}
+                  {selectedMemory.description && (
+                    <View style={styles.detailSection}>
+                      <Text style={styles.detailLabel}>Description</Text>
+                      <Text style={styles.detailDescription}>
+                        {selectedMemory.description}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Close Button */}
+                  <TouchableOpacity 
+                    style={styles.closeDetailButton} 
+                    onPress={() => setShowMemoryDetails(false)}
+                  >
+                    <Text style={styles.closeDetailText}>Close</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
           </View>
         </Modal>
@@ -418,6 +611,61 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
+  // NEW: Detail modal specific styles
+  detailModalContent: {
+    maxHeight: '80%',
+  },
+  detailImage: {
+    width: '100%',
+    height: 250,
+    borderRadius: 12,
+    marginBottom: 20,
+  },
+  detailSection: {
+    marginBottom: 20,
+  },
+  detailLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#6B7280",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  detailTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#111827",
+    lineHeight: 28,
+  },
+  dateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  detailDate: {
+    fontSize: 16,
+    color: "#7C3AED",
+    fontWeight: "600",
+  },
+  detailDescription: {
+    fontSize: 16,
+    color: "#374151",
+    lineHeight: 24,
+  },
+  closeDetailButton: {
+    backgroundColor: "#7C3AED",
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: "center",
+    marginTop: 8,
+  },
+  closeDetailText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  // Existing styles...
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -473,8 +721,49 @@ const styles = StyleSheet.create({
     padding: 14,
     fontSize: 15,
     color: "#111827",
-    minHeight: 80,
-    textAlignVertical: "top",
+  },
+  datePickerButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    padding: 14,
+  },
+  datePickerText: {
+    fontSize: 15,
+    color: '#111827',
+  },
+  datePickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  datePickerContainer: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 20,
+  },
+  datePickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  datePickerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  datePickerDone: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#7C3AED',
   },
   submitButton: {
     backgroundColor: "#7C3AED",

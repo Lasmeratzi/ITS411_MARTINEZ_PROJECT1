@@ -12,17 +12,16 @@ export default function RootLayout() {
   });
   
   if (!loaded) {
-    // Async font loading only occurs in development.
     return null;
   }
   
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
-        {/* Tabs layout (e.g. index.tsx inside (tabs)) */}
+        {/* Redirect tabs to menu */}
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         
-        {/* Standalone screens */}
+        {/* Your screens */}
         <Stack.Screen name="menu" options={{ headerShown: false }} />
         <Stack.Screen name="register" options={{ headerShown: false }} />
         <Stack.Screen name="albums" options={{ headerShown: false }} />
@@ -30,8 +29,8 @@ export default function RootLayout() {
         <Stack.Screen name="calendar" options={{ headerShown: false }} />
         <Stack.Screen name="profile" options={{ headerShown: false }} />
         <Stack.Screen name="addMemory" options={{ headerShown: false }} />
+        <Stack.Screen name="calendar-day" options={{ headerShown: false }} />
         
-        {/* Optional: 404 fallback */}
         <Stack.Screen name="+not-found" />
       </Stack>
       <StatusBar style="auto" />

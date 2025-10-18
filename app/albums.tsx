@@ -1,3 +1,4 @@
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -14,19 +15,36 @@ import {
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {
-  createAlbum,
+  createRegularAlbum,
   deleteAlbum,
   subscribeToUserAlbums,
-  updateAlbum,
+  updateAlbum
 } from "../services/albumsService";
+
+// Color options for albums
+const COLOR_OPTIONS = [
+  "#FF9A8B", // Original pink
+  "#7C3AED", // Purple
+  "#3B82F6", // Blue
+  "#10B981", // Green
+  "#F59E0B", // Amber
+  "#EF4444", // Red
+  "#8B5CF6", // Violet
+  "#06B6D4", // Cyan
+  "#84CC16", // Lime
+  "#F97316", // Orange
+];
 
 export default function Albums() {
   const router = useRouter();
   const [albums, setAlbums] = useState<any[]>([]);
   const [title, setTitle] = useState("");
-  const [date, setDate] = useState<string | null>(null);
+  const [albumDate, setAlbumDate] = useState<Date | null>(null);
+  const [selectedColor, setSelectedColor] = useState(COLOR_OPTIONS[0]);
   const [editingAlbumId, setEditingAlbumId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [description, setDescription] = useState("");
 
   useEffect(() => {
     const unsubscribe = subscribeToUserAlbums(setAlbums);
@@ -35,8 +53,19 @@ export default function Albums() {
 
   function openFormForEdit(album: any) {
     setTitle(album.title);
-    setDate(album.date || null);
+    setDescription(album.description || "");
+    setAlbumDate(album.date ? new Date(album.date) : null);
+    setSelectedColor(album.color || COLOR_OPTIONS[0]);
     setEditingAlbumId(album.id);
+    setShowForm(true);
+  }
+
+  function openFormForCreate() {
+    setTitle("");
+    setDescription("");
+    setAlbumDate(null);
+    setSelectedColor(COLOR_OPTIONS[0]);
+    setEditingAlbumId(null);
     setShowForm(true);
   }
 
@@ -47,14 +76,28 @@ export default function Albums() {
     }
 
     try {
+      const formattedDate = albumDate ? albumDate.toISOString().split('T')[0] : null;
+
       if (editingAlbumId) {
-        await updateAlbum(editingAlbumId, { title: title.trim(), date });
+        await updateAlbum(editingAlbumId, { 
+          title: title.trim(), 
+          color: selectedColor,
+          description: description.trim(),
+          date: formattedDate
+        });
       } else {
-        await createAlbum(title.trim(), date);
+        // Use createRegularAlbum for albums created from this screen
+        await createRegularAlbum(
+          title.trim(), 
+          description.trim(),
+          selectedColor
+        );
       }
 
       setTitle("");
-      setDate(null);
+      setDescription("");
+      setAlbumDate(null);
+      setSelectedColor(COLOR_OPTIONS[0]);
       setEditingAlbumId(null);
       setShowForm(false);
     } catch (error: any) {
@@ -68,6 +111,21 @@ export default function Albums() {
       { text: "Delete", style: "destructive", onPress: () => deleteAlbum(id) },
     ]);
   }
+
+  // Format date for display
+  const formatDisplayDate = (date: Date | null) => {
+    if (!date) return "No date selected";
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  // Get album type display text
+  const getAlbumTypeText = (album: any) => {
+    return album.type === 'calendar' ? 'Calendar Album' : 'Regular Album';
+  };
 
   return (
     <>
@@ -107,13 +165,27 @@ export default function Albums() {
                 onPress={() => router.push(`/memories?albumId=${album.id}`)}
                 onLongPress={() => openFormForEdit(album)}
               >
-                <Icon name="folder" size={48} color="#FF9A8B" />
+                <Icon name="folder" size={48} color={album.color || COLOR_OPTIONS[0]} />
                 <Text style={styles.albumName} numberOfLines={1}>
                   {album.title}
                 </Text>
-                {album.date && (
-                  <Text style={styles.albumDate}>{album.date}</Text>
-                )}
+                
+                {/* Album Description Preview */}
+                {album.description ? (
+                  <Text style={styles.albumDescription} numberOfLines={2}>
+                    {album.description}
+                  </Text>
+                ) : null}
+                
+                {/* Album Type and Date */}
+                <View style={styles.albumMeta}>
+                  <Text style={styles.albumType}>{getAlbumTypeText(album)}</Text>
+                  {album.date && (
+                    <Text style={styles.albumDate}>
+                      {new Date(album.date).toLocaleDateString()}
+                    </Text>
+                  )}
+                </View>
                 
                 {/* Action Buttons */}
                 <View style={styles.albumActions}>
@@ -136,7 +208,7 @@ export default function Albums() {
             {/* Add Album Box */}
             <TouchableOpacity
               style={[styles.albumBox, styles.addAlbumBox]}
-              onPress={() => setShowForm(true)}
+              onPress={openFormForCreate}
             >
               <Icon name="plus-circle" size={48} color="#FF9A8B" />
               <Text style={styles.albumName}>Create Album</Text>
@@ -175,7 +247,9 @@ export default function Albums() {
                     setShowForm(false);
                     setEditingAlbumId(null);
                     setTitle("");
-                    setDate(null);
+                    setDescription("");
+                    setAlbumDate(null);
+                    setSelectedColor(COLOR_OPTIONS[0]);
                   }}
                 >
                   <Icon name="close" size={24} color="#6B7280" />
@@ -193,15 +267,65 @@ export default function Albums() {
                 />
               </View>
 
+              {/* Description Input */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Description (Optional)</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder="Enter album description"
+                  placeholderTextColor="#9CA3AF"
+                  value={description}
+                  onChangeText={setDescription}
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              {/* Color Picker */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Album Color</Text>
+                <View style={styles.colorGrid}>
+                  {COLOR_OPTIONS.map((color) => (
+                    <TouchableOpacity
+                      key={color}
+                      style={[
+                        styles.colorOption,
+                        { backgroundColor: color },
+                        selectedColor === color && styles.colorOptionSelected,
+                      ]}
+                      onPress={() => setSelectedColor(color)}
+                    >
+                      {selectedColor === color && (
+                        <Icon name="check" size={16} color="#FFFFFF" />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Date Picker Button - Optional for regular albums */}
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Date (Optional)</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g. 2025-10-06"
-                  placeholderTextColor="#9CA3AF"
-                  value={date || ""}
-                  onChangeText={setDate}
-                />
+                <TouchableOpacity 
+                  style={styles.datePickerButton}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <Text style={styles.datePickerText}>
+                    {formatDisplayDate(albumDate)}
+                  </Text>
+                  <Icon name="calendar" size={20} color="#6B7280" />
+                </TouchableOpacity>
+                
+                {/* Clear Date Button */}
+                {albumDate && (
+                  <TouchableOpacity 
+                    style={styles.clearDateButton}
+                    onPress={() => setAlbumDate(null)}
+                  >
+                    <Text style={styles.clearDateText}>Clear Date</Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               <TouchableOpacity style={styles.submitButton} onPress={handleSubmit}>
@@ -216,11 +340,38 @@ export default function Albums() {
                   setShowForm(false);
                   setEditingAlbumId(null);
                   setTitle("");
-                  setDate(null);
+                  setDescription("");
+                  setAlbumDate(null);
+                  setSelectedColor(COLOR_OPTIONS[0]);
                 }}
               >
                 <Text style={styles.cancelModalText}>Cancel</Text>
               </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Date Picker Modal */}
+        <Modal visible={showDatePicker} transparent animationType="slide">
+          <View style={styles.datePickerOverlay}>
+            <View style={styles.datePickerContainer}>
+              <View style={styles.datePickerHeader}>
+                <Text style={styles.datePickerTitle}>Select Album Date</Text>
+                <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                  <Text style={styles.datePickerDone}>Done</Text>
+                </TouchableOpacity>
+              </View>
+              <DateTimePicker
+                value={albumDate || new Date()}
+                mode="date"
+                display="spinner"
+                onChange={(event, selectedDate) => {
+                  setShowDatePicker(false);
+                  if (selectedDate) {
+                    setAlbumDate(selectedDate);
+                  }
+                }}
+              />
             </View>
           </View>
         </Modal>
@@ -297,7 +448,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     width: "48%",
-    minHeight: 140,
+    minHeight: 160,
     justifyContent: "center",
     alignItems: "center",
     shadowColor: "#000",
@@ -317,13 +468,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: "#111827",
-    marginTop: 12,
+    marginTop: 8,
     textAlign: "center",
   },
-  albumDate: {
+  albumDescription: {
     fontSize: 11,
-    color: "#9CA3AF",
+    color: "#6B7280",
     marginTop: 4,
+    textAlign: "center",
+    lineHeight: 14,
+  },
+  albumMeta: {
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  albumType: {
+    fontSize: 10,
+    color: "#7C3AED",
+    fontWeight: "500",
+    marginBottom: 2,
+  },
+  albumDate: {
+    fontSize: 10,
+    color: "#9CA3AF",
   },
   albumActions: {
     flexDirection: "row",
@@ -417,6 +584,87 @@ const styles = StyleSheet.create({
     padding: 14,
     fontSize: 15,
     color: "#111827",
+  },
+  textArea: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  // Color Picker Styles
+  colorGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+  },
+  colorOption: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  colorOptionSelected: {
+    borderColor: "#111827",
+    transform: [{ scale: 1.1 }],
+  },
+  // Date Picker Styles
+  datePickerButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    padding: 14,
+  },
+  datePickerText: {
+    fontSize: 15,
+    color: '#111827',
+  },
+  clearDateButton: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 8,
+  },
+  clearDateText: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  datePickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  datePickerContainer: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 20,
+  },
+  datePickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  datePickerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  datePickerDone: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#7C3AED',
   },
   submitButton: {
     backgroundColor: "#7C3AED",

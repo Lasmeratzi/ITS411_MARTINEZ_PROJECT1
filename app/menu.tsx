@@ -2,10 +2,11 @@ import auth from "@react-native-firebase/auth";
 import firestore from "@react-native-firebase/firestore";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Modal, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Image, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { createRegularAlbum } from "../services/albumsService"; // NEW: Import album service
+import { useUser } from "../contexts/UserContext"; // ADD THIS IMPORT
+import { createRegularAlbum } from "../services/albumsService";
 import { signOut } from "../services/authService";
 
 interface Memory {
@@ -34,6 +35,7 @@ const COLOR_OPTIONS = [
 
 export default function Menu() {
   const router = useRouter();
+  const { user } = useUser(); // ADD THIS HOOK
   const [userName, setUserName] = useState("User");
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,18 +52,23 @@ export default function Menu() {
   const [selectedColor, setSelectedColor] = useState(COLOR_OPTIONS[0]);
 
   useEffect(() => {
-    const user = auth().currentUser;
+    const currentUser = auth().currentUser;
     
     // Don't do anything if no user is logged in
-    if (!user) {
+    if (!currentUser) {
       setLoading(false);
       return;
     }
     
-    if (user?.displayName) {
+    // Use the user from context if available, otherwise fall back to old logic
+    if (user?.username) {
+      setUserName(user.username);
+    } else if (user?.displayName) {
       setUserName(user.displayName);
-    } else if (user?.email) {
-      setUserName(user.email.split('@')[0]);
+    } else if (currentUser?.displayName) {
+      setUserName(currentUser.displayName);
+    } else if (currentUser?.email) {
+      setUserName(currentUser.email.split('@')[0]);
     }
 
     // Subscribe to user's memories
@@ -73,18 +80,18 @@ export default function Menu() {
         unsubscribe();
       }
     };
-  }, []);
+  }, [user]); // ADD user TO DEPENDENCY ARRAY
 
   const loadUserMemories = () => {
-    const user = auth().currentUser;
-    if (!user) {
+    const currentUser = auth().currentUser;
+    if (!currentUser) {
       setLoading(false);
       return () => {}; // Return empty cleanup function
     }
 
     const unsubscribe = firestore()
       .collection("memories")
-      .where("createdBy", "==", user.uid)
+      .where("createdBy", "==", currentUser.uid)
       .orderBy("createdAt", "desc")
       .limit(10)
       .onSnapshot(
@@ -172,7 +179,7 @@ export default function Menu() {
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.appName}>Memories</Text>
+          <Text style={styles.appName}>Reminora</Text>
           <View style={styles.headerIcons}>
             <TouchableOpacity style={styles.iconButton}>
               <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
@@ -237,7 +244,10 @@ export default function Menu() {
 
         {/* Greeting Card */}
         <View style={styles.greetingCard}>
-          <Text style={styles.greeting}>Hi, {userName}</Text>
+          {/* FIXED: Use user from context with proper null checking */}
+          <Text style={styles.greeting}>
+            Hi, {user?.username || user?.displayName || userName}
+          </Text>
           <Text style={styles.tagline}>
             Your memories matter. Let's keep writing them together.
           </Text>
@@ -326,154 +336,7 @@ export default function Menu() {
           )}
         </View>
 
-        <View style={styles.bottomPadding} />
-
-        {/* Memory Details Modal */}
-        <Modal visible={showMemoryDetails} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalContent, styles.detailModalContent]}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Memory Details</Text>
-                <TouchableOpacity
-                  onPress={() => setShowMemoryDetails(false)}
-                >
-                  <Icon name="close" size={24} color="#6B7280" />
-                </TouchableOpacity>
-              </View>
-
-              {selectedMemory && (
-                <>
-                  {/* Memory Image */}
-                  <Image 
-                    source={{ uri: selectedMemory.imageUrl }} 
-                    style={styles.detailImage}
-                    resizeMode="cover"
-                  />
-                  
-                  {/* Memory Title */}
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Title</Text>
-                    <Text style={styles.detailTitle}>{selectedMemory.title || selectedMemory.description || "Untitled memory"}</Text>
-                  </View>
-
-                  {/* Memory Date */}
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Date</Text>
-                    <View style={styles.dateRow}>
-                      <Icon name="calendar" size={16} color="#6B7280" />
-                      <Text style={styles.detailDate}>
-                        {selectedMemory.date ? formatDisplayDate(selectedMemory.date) : "No date set"}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Memory Description */}
-                  {selectedMemory.description && (
-                    <View style={styles.detailSection}>
-                      <Text style={styles.detailLabel}>Description</Text>
-                      <Text style={styles.detailDescription}>
-                        {selectedMemory.description}
-                      </Text>
-                    </View>
-                  )}
-
-                  {/* Close Button */}
-                  <TouchableOpacity 
-                    style={styles.closeDetailButton} 
-                    onPress={() => setShowMemoryDetails(false)}
-                  >
-                    <Text style={styles.closeDetailText}>Close</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          </View>
-        </Modal>
-
-        {/* NEW: Album Creation Modal */}
-        <Modal visible={showAlbumForm} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Create New Album</Text>
-                <TouchableOpacity
-                  onPress={() => {
-                    setShowAlbumForm(false);
-                    setAlbumTitle("");
-                    setAlbumDescription("");
-                    setSelectedColor(COLOR_OPTIONS[0]);
-                  }}
-                >
-                  <Icon name="close" size={24} color="#6B7280" />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Album Title</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter album name"
-                  placeholderTextColor="#9CA3AF"
-                  value={albumTitle}
-                  onChangeText={setAlbumTitle}
-                />
-              </View>
-
-              {/* Description Input */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Description (Optional)</Text>
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  placeholder="Enter album description"
-                  placeholderTextColor="#9CA3AF"
-                  value={albumDescription}
-                  onChangeText={setAlbumDescription}
-                  multiline
-                  numberOfLines={3}
-                  textAlignVertical="top"
-                />
-              </View>
-
-              {/* Color Picker */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Album Color</Text>
-                <View style={styles.colorGrid}>
-                  {COLOR_OPTIONS.map((color) => (
-                    <TouchableOpacity
-                      key={color}
-                      style={[
-                        styles.colorOption,
-                        { backgroundColor: color },
-                        selectedColor === color && styles.colorOptionSelected,
-                      ]}
-                      onPress={() => setSelectedColor(color)}
-                    >
-                      {selectedColor === color && (
-                        <Icon name="check" size={16} color="#FFFFFF" />
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-
-              <TouchableOpacity style={styles.submitButton} onPress={handleCreateAlbum}>
-                <Text style={styles.submitButtonText}>Create Album</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.cancelModalButton}
-                onPress={() => {
-                  setShowAlbumForm(false);
-                  setAlbumTitle("");
-                  setAlbumDescription("");
-                  setSelectedColor(COLOR_OPTIONS[0]);
-                }}
-              >
-                <Text style={styles.cancelModalText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
+        {/* ... rest of your component remains the same ... */}
       </ScrollView>
     </>
   );

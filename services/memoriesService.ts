@@ -1,43 +1,64 @@
 import auth from "@react-native-firebase/auth";
 import firestore from "@react-native-firebase/firestore";
-import { getAlbumById } from "./albumsService"; // ADD THIS IMPORT
+import { findOrCreateMonthAlbum, findOrCreateYearAlbum } from "./albumsService";
 
 export async function createMemory(
   title: string,
   description: string,
   imageUrl: string,
-  albumId: string | null = null,
+  albumIds: string[] = [],
+  date: string | null = null
+) {
+  // FIXED: Add empty videoUrls array as the 4th parameter
+  return createMemoryWithMultipleImages(
+    title, 
+    description, 
+    [imageUrl], 
+    [], // ADD: empty videoUrls array
+    albumIds, 
+    date
+  );
+}
+
+export async function createMemoryWithMultipleImages(
+  title: string,
+  description: string,
+  imageUrls: string[],
+  videoUrls: string[] = [], // ADD: Support for videos
+  albumIds: string[] = [],
   date: string | null = null
 ) {
   const user = auth().currentUser;
   if (!user) throw new Error("User not logged in");
 
   let finalDate = date;
+  const finalAlbumIds = [...albumIds];
 
-  // NEW: If albumId is provided, check if it's a calendar album
-  if (albumId) {
+  // Auto-add to hierarchical albums if date exists
+  if (date) {
     try {
-      const album = await getAlbumById(albumId);
+      const [year, month] = date.split('-');
       
-      // Use type assertion to fix TypeScript issues
-      const albumData = album as any;
+      const monthAlbumId = await findOrCreateMonthAlbum(year, month);
+      if (monthAlbumId && !finalAlbumIds.includes(monthAlbumId)) {
+        finalAlbumIds.push(monthAlbumId);
+      }
       
-      // If it's a calendar album, use the album's displayDate
-      if (albumData && albumData.type === 'calendar' && albumData.displayDate) {
-        console.log('Calendar album detected, using album date:', albumData.displayDate);
-        finalDate = albumData.displayDate;
+      const yearAlbumId = await findOrCreateYearAlbum(year);
+      if (yearAlbumId && !finalAlbumIds.includes(yearAlbumId)) {
+        finalAlbumIds.push(yearAlbumId);
       }
     } catch (error) {
-      console.error('Error checking album type, using user-provided date:', error);
-      // If there's an error, fall back to the user-provided date
+      console.error('Error handling hierarchical albums:', error);
     }
   }
 
   return firestore().collection("memories").add({
     title,
     description,
-    imageUrl,
-    albumId,
+    imageUrls,
+    videoUrls, // ADD: Store video URLs
+    albumIds: finalAlbumIds,
     createdBy: user.uid,
     createdAt: firestore.FieldValue.serverTimestamp(),
     date: finalDate,
@@ -50,9 +71,10 @@ export async function updateMemory(
   data: Partial<{ 
     title: string; 
     description: string; 
-    imageUrl: string; 
-    albumId: string | null; 
-    date?: string 
+    imageUrls: string[];
+    videoUrls: string[]; // ADD: Support for videos
+    albumIds: string[];
+    date?: string;
   }>
 ) {
   if (data.date) {
@@ -83,8 +105,9 @@ export function subscribeToUserMemories(
     .where("createdBy", "==", user.uid)
     .orderBy("createdAt", "desc");
 
+  // UPDATED: If albumId provided, check if memory belongs to this album
   if (albumId) {
-    query = query.where("albumId", "==", albumId);
+    query = query.where("albumIds", "array-contains", albumId);
   }
 
   return query.onSnapshot(
@@ -147,7 +170,8 @@ export async function createCalendarMemory(
   title: string,
   description: string,
   imageUrl: string,
-  date: Date // Specialized for calendar - accepts Date object
+  date: Date, // Specialized for calendar - accepts Date object
+  albumIds: string[] = [] // ADD: Accept album IDs array
 ) {
   const user = auth().currentUser;
   if (!user) throw new Error("User not logged in");
@@ -158,13 +182,12 @@ export async function createCalendarMemory(
   const day = String(date.getDate()).padStart(2, '0');
   const formattedDate = `${year}-${month}-${day}`;
 
-  return firestore().collection("memories").add({
+  // Use the updated createMemory function
+  return createMemory(
     title,
     description,
     imageUrl,
-    albumId: null, // Calendar memories don't go to albums by default
-    createdBy: user.uid,
-    createdAt: firestore.FieldValue.serverTimestamp(),
-    date: formattedDate,
-  });
+    albumIds, // PASS THE ALBUM IDs
+    formattedDate
+  );
 }

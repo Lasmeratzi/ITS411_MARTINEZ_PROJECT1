@@ -1,4 +1,4 @@
-package com.company.expo
+package com.company.reminora
 
 import android.app.Application
 import android.content.res.Configuration

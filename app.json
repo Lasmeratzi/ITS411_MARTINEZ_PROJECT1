@@ -11,7 +11,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.company.reminora"
+      "bundleIdentifier": "com.company.package"
     },
     "android": {
       "googleServicesFile": "./google-services.json",
@@ -20,7 +20,7 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.company.reminora"
+      "package": "com.company.expo"
     },
     "web": {
       "bundler": "metro",
@@ -41,7 +41,8 @@
           "resizeMode": "contain"
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true

@@ -1,11 +1,24 @@
 import auth from "@react-native-firebase/auth";
 import firestore from "@react-native-firebase/firestore";
 import { useRouter } from "expo-router";
+import * as VideoThumbnails from 'expo-video-thumbnails';
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Image, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
+} from "react-native";
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useUser } from "../contexts/UserContext"; // ADD THIS IMPORT
+import { useUser } from "../contexts/UserContext";
+import AlbumModal from "../modals/AlbumModal";
+import MemoryModal from "../modals/MemoryModal";
 import { createRegularAlbum } from "../services/albumsService";
 import { signOut } from "../services/authService";
 
@@ -13,29 +26,23 @@ interface Memory {
   id: string;
   title?: string;
   description: string;
-  imageUrl: string;
+  imageUrl?: string;        // Single image (old format)
+  imageUrls?: string[];     // Multiple images (new format)
+  videoUrls?: string[];     // Multiple videos
   createdAt: any;
   date?: string;
   albumName?: string;
 }
 
-// NEW: Color options for albums
+// Color options for albums (moved to AlbumModal, keeping here for reference)
 const COLOR_OPTIONS = [
-  "#FF9A8B", // Original pink
-  "#7C3AED", // Purple
-  "#3B82F6", // Blue
-  "#10B981", // Green
-  "#F59E0B", // Amber
-  "#EF4444", // Red
-  "#8B5CF6", // Violet
-  "#06B6D4", // Cyan
-  "#84CC16", // Lime
-  "#F97316", // Orange
+  "#FF9A8B", "#7C3AED", "#3B82F6", "#10B981", "#F59E0B",
+  "#EF4444", "#8B5CF6", "#06B6D4", "#84CC16", "#F97316",
 ];
 
 export default function Menu() {
   const router = useRouter();
-  const { user } = useUser(); // ADD THIS HOOK
+  const { user } = useUser();
   const [userName, setUserName] = useState("User");
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,99 +52,134 @@ export default function Menu() {
   const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null);
   const [showMemoryDetails, setShowMemoryDetails] = useState(false);
 
-  // NEW: State for album creation
+  // State for album creation modal
   const [showAlbumForm, setShowAlbumForm] = useState(false);
   const [albumTitle, setAlbumTitle] = useState("");
   const [albumDescription, setAlbumDescription] = useState("");
   const [selectedColor, setSelectedColor] = useState(COLOR_OPTIONS[0]);
+  const [albumDate, setAlbumDate] = useState<Date | null>(null);
+  const [albumCoverImage, setAlbumCoverImage] = useState<string | null>(null);
+  const [videoThumbnails, setVideoThumbnails] = useState<{[key: string]: string}>({});
 
   useEffect(() => {
-    const currentUser = auth().currentUser;
-    
-    // Don't do anything if no user is logged in
-    if (!currentUser) {
-      setLoading(false);
-      return;
-    }
-    
-    // Use the user from context if available, otherwise fall back to old logic
-    if (user?.username) {
-      setUserName(user.username);
-    } else if (user?.displayName) {
-      setUserName(user.displayName);
-    } else if (currentUser?.displayName) {
-      setUserName(currentUser.displayName);
-    } else if (currentUser?.email) {
-      setUserName(currentUser.email.split('@')[0]);
-    }
+  const currentUser = auth().currentUser;
+  if (!currentUser) {
+    setLoading(false);
+    return;
+  }
 
-    // Subscribe to user's memories
-    const unsubscribe = loadUserMemories();
-    
-    // Cleanup listener when component unmounts
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
-    };
-  }, [user]); // ADD user TO DEPENDENCY ARRAY
+  if (user?.username) {
+    setUserName(user.username);
+  } else if (user?.displayName) {
+    setUserName(user.displayName);
+  } else if (currentUser?.displayName) {
+    setUserName(currentUser.displayName);
+  } else if (currentUser?.email) {
+    setUserName(currentUser.email.split('@')[0]);
+  }
 
-  const loadUserMemories = () => {
-    const currentUser = auth().currentUser;
-    if (!currentUser) {
-      setLoading(false);
-      return () => {}; // Return empty cleanup function
+  const unsubscribe = loadUserMemories();
+  
+  return () => {
+    if (unsubscribe) {
+      unsubscribe();
     }
+  };
+}, [user]);
 
-    const unsubscribe = firestore()
-      .collection("memories")
-      .where("createdBy", "==", currentUser.uid)
-      .orderBy("createdAt", "desc")
-      .limit(10)
-      .onSnapshot(
-        (snapshot) => {
-          const fetchedMemories = snapshot.docs.map((doc) => ({
+ const loadUserMemories = () => {
+  const currentUser = auth().currentUser;
+  if (!currentUser) {
+    setLoading(false);
+    return () => {};
+  }
+
+  const unsubscribe = firestore()
+    .collection("memories")
+    .where("createdBy", "==", currentUser.uid)
+    .orderBy("createdAt", "desc")
+    .limit(10)
+    .onSnapshot(
+      (snapshot) => {
+        const fetchedMemories = snapshot.docs.map((doc) => {
+          const data = doc.data();
+          const memory = {
             id: doc.id,
-            ...doc.data(),
-          })) as Memory[];
-          setMemories(fetchedMemories);
-          setLoading(false);
-        },
-        (error) => {
-          console.error("Error loading memories:", error);
-          setLoading(false);
-        }
-      );
+            title: data.title,
+            description: data.description,
+            imageUrl: data.imageUrl,
+            imageUrls: data.imageUrls,
+            videoUrls: data.videoUrls,
+            createdAt: data.createdAt,
+            date: data.date,
+            albumName: data.albumName,
+          } as Memory;
 
-    return unsubscribe;
-  };
+          // Generate thumbnails for videos
+          if (memory.videoUrls && memory.videoUrls.length > 0) {
+            memory.videoUrls.forEach((videoUri, index) => {
+              generateVideoThumbnail(videoUri, `${memory.id}_${index}`);
+            });
+          }
 
-  // NEW: Function to create album
+          return memory;
+        });
+        setMemories(fetchedMemories);
+        setLoading(false);
+      },
+      (error) => {
+        console.error("Error loading memories:", error);
+        setLoading(false);
+      }
+    );
+
+  return unsubscribe;
+};
+
+  // Function to create album - UPDATED
   const handleCreateAlbum = async () => {
-    if (!albumTitle.trim()) {
-      alert("Please enter an album title");
-      return;
-    }
+  if (!albumTitle.trim()) {
+    Alert.alert("Error", "Please enter an album title.");
+    return;
+  }
 
-    try {
-      await createRegularAlbum(
-        albumTitle.trim(),
-        albumDescription.trim(),
-        selectedColor
-      );
-      
-      // Reset form
-      setAlbumTitle("");
-      setAlbumDescription("");
-      setSelectedColor(COLOR_OPTIONS[0]);
-      setShowAlbumForm(false);
-      
-      alert("Album created successfully!");
-    } catch (error: any) {
-      alert("Error creating album: " + error.message);
-    }
-  };
+  try {
+    const formattedDate = albumDate ? albumDate.toISOString().split('T')[0] : null;
+    
+    await createRegularAlbum(
+      albumTitle.trim(),
+      albumDescription.trim(),
+      selectedColor,
+      formattedDate,
+      albumCoverImage
+    );
 
+    // Reset form
+    setAlbumTitle("");
+    setAlbumDescription("");
+    setSelectedColor(COLOR_OPTIONS[0]);
+    setAlbumDate(null);
+    setAlbumCoverImage(null);
+    setShowAlbumForm(false);
+  } catch (error: any) {
+    Alert.alert("Error", error.message);
+  }
+};
+
+
+const generateVideoThumbnail = async (videoUri: string, memoryId: string) => {
+  try {
+    const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, {
+      time: 1000, // 1 second into the video
+    });
+    setVideoThumbnails(prev => ({
+      ...prev,
+      [memoryId]: uri
+    }));
+  } catch (error) {
+    console.error('Error generating video thumbnail:', error);
+  }
+};
   const formatTimeAgo = (timestamp: any) => {
     if (!timestamp) return "Just now";
     
@@ -153,7 +195,7 @@ export default function Menu() {
     return date.toLocaleDateString();
   };
 
-  // Date formatting function (same as in memories.tsx)
+  // Date formatting function
   const formatDisplayDate = (dateString: string) => {
     if (!dateString) return "No date";
     
@@ -172,6 +214,51 @@ export default function Menu() {
       return "Date not available";
     }
   };
+
+  // NEW: Format date for memory cards (shorter version)
+  const formatMemoryDate = (dateString: string) => {
+    if (!dateString) return "";
+    
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return "";
+      }
+      const now = new Date();
+      const isCurrentYear = date.getFullYear() === now.getFullYear();
+      
+      if (isCurrentYear) {
+        return date.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric'
+        });
+      } else {
+        return date.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric'
+        });
+      }
+    } catch (error) {
+      console.error("Error formatting memory date:", error);
+      return "";
+    }
+  };
+
+  const handleCloseMemoryModal = () => {
+    setShowMemoryDetails(false);
+    setSelectedMemory(null);
+  };
+
+  // UPDATED: handleCloseAlbumModal function
+  const handleCloseAlbumModal = () => {
+  setShowAlbumForm(false);
+  setAlbumTitle("");
+  setAlbumDescription("");
+  setSelectedColor(COLOR_OPTIONS[0]);
+  setAlbumDate(null);
+  setAlbumCoverImage(null);
+};
 
   return (
     <>
@@ -212,7 +299,7 @@ export default function Menu() {
                   <Text style={styles.dropdownText}>Profile</Text>
                 </TouchableOpacity>
                 
-                {/* NEW: Create Album Option */}
+                {/* Create Album Option */}
                 <TouchableOpacity 
                   style={styles.dropdownItem}
                   onPress={() => {
@@ -223,6 +310,17 @@ export default function Menu() {
                   <Icon name="folder-plus" size={20} color="#111827" style={styles.dropdownIcon} />
                   <Text style={styles.dropdownText}>Create Album</Text>
                 </TouchableOpacity>
+
+                <TouchableOpacity 
+  style={styles.dropdownItem}
+  onPress={() => {
+    setShowDropdown(false);
+    router.push("/gallery");
+  }}
+>
+  <Icon name="image-multiple" size={20} color="#111827" style={styles.dropdownIcon} />
+  <Text style={styles.dropdownText}>App Gallery</Text>
+</TouchableOpacity>
                 
                 <View style={styles.dropdownDivider} />
                 
@@ -244,7 +342,6 @@ export default function Menu() {
 
         {/* Greeting Card */}
         <View style={styles.greetingCard}>
-          {/* FIXED: Use user from context with proper null checking */}
           <Text style={styles.greeting}>
             Hi, {user?.username || user?.displayName || userName}
           </Text>
@@ -304,40 +401,120 @@ export default function Menu() {
               <Text style={styles.emptySubtitle}>Tap to create your first memory</Text>
             </TouchableOpacity>
           ) : (
-            memories.map((memory) => (
-              <TouchableOpacity 
-                key={memory.id}
-                style={styles.memoryCard}
-                onPress={() => {
-                  setSelectedMemory(memory);
-                  setShowMemoryDetails(true);
-                }}
-              >
-                <Image 
-                  source={{ uri: memory.imageUrl }} 
-                  style={styles.memoryImage}
-                  resizeMode="cover"
-                />
-                <View style={styles.memoryContent}>
-                  <View style={styles.memoryHeader}>
-                    <Text style={styles.memoryTime}>{formatTimeAgo(memory.createdAt)}</Text>
-                    {memory.albumName && (
-                      <View style={styles.albumBadge}>
-                        <Text style={styles.albumBadgeText}>{memory.albumName}</Text>
+            memories.map((memory) => {
+              // Get the first available image for preview
+              const previewImage = memory.imageUrls?.[0] || memory.imageUrl;
+const hasVideos = memory.videoUrls && memory.videoUrls.length > 0;
+const videoThumbnail = hasVideos ? videoThumbnails[`${memory.id}_0`] : null;
+const isVideoOnly = !previewImage && hasVideos;
+
+              return (
+  <TouchableOpacity 
+    key={memory.id}
+    style={styles.memoryCard}
+    onPress={() => {
+      setSelectedMemory(memory);
+      setShowMemoryDetails(true);
+    }}
+  >
+    {/* Media Display */}
+    <View style={styles.memoryMediaContainer}>
+      {previewImage ? (
+        <Image 
+          source={{ uri: previewImage }} 
+          style={styles.memoryImage}
+          resizeMode="cover"
+        />
+      ) : videoThumbnail ? (
+        <Image 
+          source={{ uri: videoThumbnail }} 
+          style={styles.memoryImage}
+          resizeMode="cover"
+        />
+      ) : isVideoOnly ? (
+        <View style={styles.videoPlaceholder}>
+          <Icon name="play-circle-outline" size={40} color="#7C3AED" />
+          <Text style={styles.videoPlaceholderText}>Video Memory</Text>
+          <Text style={styles.videoCountText}>
+            {memory.videoUrls ? memory.videoUrls.length : 0} video{memory.videoUrls && memory.videoUrls.length > 1 ? 's' : ''}
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.noMediaPlaceholder}>
+          <Icon name="image-off" size={40} color="#9CA3AF" />
+          <Text style={styles.noMediaText}>No Media</Text>
+        </View>
+      )}
+      
+      {/* Video Indicator Badge */}
+      {hasVideos && (
+        <View style={styles.videoIndicator}>
+          <Icon name="video" size={16} color="#FFFFFF" />
+          {memory.videoUrls && memory.videoUrls.length > 1 && (
+            <Text style={styles.videoCountBadge}>{memory.videoUrls.length}</Text>
+          )}
+        </View>
+      )}
+    </View>
+
+                  <View style={styles.memoryContent}>
+                    <View style={styles.memoryHeader}>
+                      <View style={styles.dateInfo}>
+                        {/* Show both the actual date and time ago */}
+                        {memory.date && (
+                          <Text style={styles.memoryDate}>
+                            {formatMemoryDate(memory.date)}
+                          </Text>
+                        )}
+                        <Text style={styles.memoryTime}>
+                          {formatTimeAgo(memory.createdAt)}
+                        </Text>
                       </View>
-                    )}
+                      {memory.albumName && (
+                        <View style={styles.albumBadge}>
+                          <Text style={styles.albumBadgeText}>{memory.albumName}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.memoryDescription} numberOfLines={2}>
+                      {memory.title || memory.description || "Untitled memory"}
+                    </Text>
                   </View>
-                  <Text style={styles.memoryDescription} numberOfLines={2}>
-                    {memory.title || memory.description || "Untitled memory"}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            ))
+                </TouchableOpacity>
+              );
+            })
           )}
         </View>
 
-        {/* ... rest of your component remains the same ... */}
+        {/* Bottom padding */}
+        <View style={styles.bottomPadding} />
       </ScrollView>
+
+      {/* Memory Details Modal */}
+      <MemoryModal
+        visible={showMemoryDetails}
+        memory={selectedMemory}
+        onClose={handleCloseMemoryModal}
+        formatDisplayDate={formatDisplayDate}
+        formatTimeAgo={formatTimeAgo}
+      />
+
+      {/* Album Creation Modal - UPDATED WITH COVER IMAGE */}
+      <AlbumModal
+        visible={showAlbumForm}
+        albumTitle={albumTitle}
+        albumDescription={albumDescription}
+        selectedColor={selectedColor}
+        albumDate={albumDate}
+        albumCoverImage={albumCoverImage}
+        onAlbumTitleChange={setAlbumTitle}
+        onAlbumDescriptionChange={setAlbumDescription}
+        onColorSelect={setSelectedColor}
+        onDateChange={setAlbumDate}
+        onCoverImageChange={setAlbumCoverImage}
+        onSubmit={handleCreateAlbum}
+        onClose={handleCloseAlbumModal}
+      />
     </>
   );
 }
@@ -521,10 +698,62 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
   },
+  memoryMediaContainer: {
+    position: 'relative',
+  },
   memoryImage: {
     width: "100%",
     height: 220,
     backgroundColor: "#F3F4F6",
+  },
+  videoPlaceholder: {
+    width: "100%",
+    height: 220,
+    backgroundColor: "#F3F4F6",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  videoPlaceholderText: {
+    marginTop: 8,
+    fontSize: 16,
+    color: "#7C3AED",
+    fontWeight: "600",
+  },
+  videoCountText: {
+    marginTop: 4,
+    fontSize: 12,
+    color: "#6B7280",
+  },
+  noMediaPlaceholder: {
+    width: "100%",
+    height: 220,
+    backgroundColor: "#F3F4F6",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  noMediaText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: "#9CA3AF",
+  },
+  videoIndicator: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    minWidth: 24,
+    justifyContent: 'center',
+  },
+  videoCountBadge: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "600",
   },
   memoryContent: {
     padding: 16,
@@ -532,11 +761,20 @@ const styles = StyleSheet.create({
   memoryHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
     marginBottom: 8,
   },
+  dateInfo: {
+    flex: 1,
+  },
+  memoryDate: {
+    fontSize: 14,
+    color: "#7C3AED",
+    fontWeight: "600",
+    marginBottom: 2,
+  },
   memoryTime: {
-    fontSize: 13,
+    fontSize: 12,
     color: "#9CA3AF",
     fontWeight: "500",
   },
@@ -545,6 +783,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+    marginLeft: 8,
   },
   albumBadgeText: {
     fontSize: 11,
@@ -559,161 +798,5 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 40,
-  },
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  modalContent: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 24,
-    width: "100%",
-    maxWidth: 400,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  detailModalContent: {
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 24,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  detailImage: {
-    width: '100%',
-    height: 250,
-    borderRadius: 12,
-    marginBottom: 20,
-  },
-  detailSection: {
-    marginBottom: 20,
-  },
-  detailLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#6B7280",
-    marginBottom: 8,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  detailTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#111827",
-    lineHeight: 28,
-  },
-  dateRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  detailDate: {
-    fontSize: 16,
-    color: "#7C3AED",
-    fontWeight: "600",
-  },
-  detailDescription: {
-    fontSize: 16,
-    color: "#374151",
-    lineHeight: 24,
-  },
-  closeDetailButton: {
-    backgroundColor: "#7C3AED",
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: "center",
-    marginTop: 8,
-  },
-  closeDetailText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  // NEW: Album Form Styles
-  inputGroup: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#374151",
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: "#F9FAFB",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 15,
-    color: "#111827",
-  },
-  textArea: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  colorGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 8,
-  },
-  colorOption: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  colorOptionSelected: {
-    borderColor: "#111827",
-    transform: [{ scale: 1.1 }],
-  },
-  submitButton: {
-    backgroundColor: "#7C3AED",
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: "center",
-    marginTop: 8,
-    shadowColor: "#7C3AED",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  submitButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  cancelModalButton: {
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginTop: 12,
-  },
-  cancelModalText: {
-    color: "#6B7280",
-    fontSize: 16,
-    fontWeight: "600",
   },
 });

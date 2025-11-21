@@ -40,22 +40,23 @@ export default function Index() {
 
   return (
     <>
-      <StatusBar barStyle="light-content" backgroundColor="#6C63FF" />
+      <StatusBar barStyle="light-content" backgroundColor="#1A1A2E" />
       <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
         {/* Header Section */}
         <View style={styles.header}>
-          <Text style={styles.title}>Sign in</Text>
+          <Text style={styles.title}>Welcome Back</Text>
+          <Text style={styles.subtitle}>Sign in to continue</Text>
         </View>
 
         {/* Form Section */}
         <View style={styles.formContainer}>
           {/* Email Input */}
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email:</Text>
+            <Text style={styles.label}>Email Address</Text>
             <TextInput
               style={styles.input}
-              placeholder="youremail@gmail.com"
-              placeholderTextColor="#999"
+              placeholder="Enter your email"
+              placeholderTextColor="#A0A0A0"
               keyboardType="email-address"
               autoCapitalize="none"
               value={email}
@@ -65,11 +66,11 @@ export default function Index() {
 
           {/* Password Input */}
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password:</Text>
+            <Text style={styles.label}>Password</Text>
             <TextInput
               style={styles.input}
-              placeholder="••••••••••••"
-              placeholderTextColor="#999"
+              placeholder="Enter your password"
+              placeholderTextColor="#A0A0A0"
               secureTextEntry
               value={password}
               onChangeText={setPassword}
@@ -83,13 +84,13 @@ export default function Index() {
               onPress={() => setRememberMe(!rememberMe)}
             >
               <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
-                {rememberMe && <Text style={styles.checkmark}>✓</Text>}
+                {rememberMe && <View style={styles.checkmark} />}
               </View>
               <Text style={styles.rememberText}>Remember me</Text>
             </TouchableOpacity>
             
             <TouchableOpacity>
-              <Text style={styles.forgotText}>Forget Password</Text>
+              <Text style={styles.forgotText}>Forgot Password?</Text>
             </TouchableOpacity>
           </View>
 
@@ -103,15 +104,15 @@ export default function Index() {
             disabled={loading}
           >
             <Text style={styles.loginButtonText}>
-              {loading ? 'Logging in...' : 'Login →'}
+              {loading ? 'Signing In...' : 'Sign In'}
             </Text>
           </TouchableOpacity>
 
           {/* Sign Up Link */}
           <View style={styles.signupRow}>
-            <Text style={styles.signupText}>Don't have an account yet? </Text>
+            <Text style={styles.signupText}>Don't have an account? </Text>
             <TouchableOpacity onPress={() => router.push('/register')}>
-              <Text style={styles.signupLink}>Sign up here</Text>
+              <Text style={styles.signupLink}>Create Account</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -129,123 +130,139 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   header: {
-    backgroundColor: '#6C63FF',
-    paddingHorizontal: 30,
-    paddingTop: 80,
-    paddingBottom: 40,
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
+    backgroundColor: '#1A1A2E',
+    paddingHorizontal: 32,
+    paddingTop: 100,
+    paddingBottom: 60,
+    borderBottomLeftRadius: 40,
+    borderBottomRightRadius: 40,
   },
   title: {
-    fontSize: 32,
+    fontSize: 36,
     fontWeight: '700',
     color: '#FFFFFF',
     textAlign: 'center',
+    marginBottom: 8,
+    letterSpacing: 0.5,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#E6E6E6',
+    textAlign: 'center',
+    fontWeight: '400',
   },
   formContainer: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 30,
-    paddingTop: 40,
+    paddingHorizontal: 32,
+    paddingTop: 48,
   },
   inputGroup: {
-    marginBottom: 24,
+    marginBottom: 28,
   },
   label: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
-    color: '#333333',
-    marginBottom: 8,
+    color: '#2D3748',
+    marginBottom: 10,
+    letterSpacing: 0.3,
   },
   input: {
-    backgroundColor: '#F8F8F8',
-    borderRadius: 12,
-    paddingVertical: 16,
+    backgroundColor: '#F7FAFC',
+    borderRadius: 16,
+    paddingVertical: 18,
     paddingHorizontal: 20,
     fontSize: 16,
-    color: '#333333',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
+    color: '#2D3748',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
   },
   optionsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 28,
   },
   checkboxRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 6,
     borderWidth: 2,
-    borderColor: '#6C63FF',
-    marginRight: 8,
+    borderColor: '#CBD5E0',
+    marginRight: 12,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#FFFFFF',
   },
   checkboxChecked: {
-    backgroundColor: '#6C63FF',
-    borderColor: '#6C63FF',
+    backgroundColor: '#1A1A2E',
+    borderColor: '#1A1A2E',
   },
   checkmark: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
+    width: 12,
+    height: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 2,
   },
   rememberText: {
-    fontSize: 14,
-    color: '#666666',
+    fontSize: 15,
+    color: '#4A5568',
     fontWeight: '500',
   },
   forgotText: {
-    fontSize: 14,
-    color: '#6C63FF',
+    fontSize: 15,
+    color: '#1A1A2E',
     fontWeight: '600',
   },
   message: {
-    color: '#FF4757',
+    color: '#E53E3E',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
     fontSize: 14,
     fontWeight: '500',
+    backgroundColor: '#FED7D7',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
   },
   loginButton: {
-    backgroundColor: '#6C63FF',
-    borderRadius: 12,
-    paddingVertical: 16,
+    backgroundColor: '#1A1A2E',
+    borderRadius: 16,
+    paddingVertical: 18,
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 24,
-    shadowColor: '#6C63FF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
+    marginTop: 12,
+    marginBottom: 32,
+    shadowColor: '#1A1A2E',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
   },
   loginButtonDisabled: {
-    opacity: 0.6,
+    opacity: 0.7,
   },
   loginButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
+    letterSpacing: 0.5,
   },
   signupRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 16,
+    marginTop: 24,
   },
   signupText: {
-    fontSize: 14,
-    color: '#666666',
+    fontSize: 15,
+    color: '#718096',
   },
   signupLink: {
-    fontSize: 14,
-    color: '#6C63FF',
-    fontWeight: '600',
+    fontSize: 15,
+    color: '#1A1A2E',
+    fontWeight: '700',
   },
 });

@@ -48,6 +48,7 @@ export default function RootLayout() {
           <Stack.Screen name="profile" options={{ headerShown: false }} />
           <Stack.Screen name="addMemory" options={{ headerShown: false }} />
           <Stack.Screen name="calendar-day" options={{ headerShown: false }} />
+          <Stack.Screen name="gallery" options={{ headerShown: false }} />
           
           <Stack.Screen name="+not-found" />
         </Stack>

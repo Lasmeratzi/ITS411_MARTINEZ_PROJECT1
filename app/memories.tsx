@@ -3,6 +3,7 @@ import auth from "@react-native-firebase/auth";
 import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import * as VideoThumbnails from 'expo-video-thumbnails'; // ADD THIS IMPORT
 import React, { useEffect, useState } from "react";
 import {
   Alert,
@@ -19,6 +20,7 @@ import {
 } from "react-native";
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import MemoryModal from "../modals/MemoryModal";
 import { createMemory, subscribeToUserMemories } from "../services/memoriesService";
 
 const screenWidth = Dimensions.get("window").width;
@@ -27,35 +29,115 @@ const imageSize = screenWidth / numColumns - 16;
 
 export default function Memories() {
   const router = useRouter();
-  const { albumId } = useLocalSearchParams<{ albumId: string }>();
+  const { albumId, date, title } = useLocalSearchParams<{ albumId: string; date: string; title: string }>();
   const [memories, setMemories] = useState<any[]>([]);
+  const [filteredMemories, setFilteredMemories] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [image, setImage] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
+  const [titleInput, setTitleInput] = useState("");
   const [description, setDescription] = useState("");
   const [memoryDate, setMemoryDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [albumTitle, setAlbumTitle] = useState("Memories");
+  const [pageTitle, setPageTitle] = useState("Memories");
+  const [videoThumbnails, setVideoThumbnails] = useState<{[key: string]: string}>({}); // ADD THIS
   
-  // NEW: State for memory details modal
+  // State for memory details modal
   const [selectedMemory, setSelectedMemory] = useState<any>(null);
   const [showMemoryDetails, setShowMemoryDetails] = useState(false);
 
-   useEffect(() => {
-    const unsubscribe = subscribeToUserMemories(setMemories, albumId);
-    return () => unsubscribe();
-  }, [albumId]);
-
-  // ADD THIS RIGHT HERE - after the existing useEffect:
-  useEffect(() => {
-    if (albumId) {
-      // You could fetch album details here if needed
-      // For now, we'll just update the header title
-      setAlbumTitle("Album Memories");
-    } else {
-      setAlbumTitle("Memories"); // Reset to default if no albumId
+  // Function to generate video thumbnail
+  const generateVideoThumbnail = async (videoUri: string, memoryId: string, index: number = 0) => {
+    try {
+      const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, {
+        time: 1000, // 1 second into the video
+      });
+      setVideoThumbnails(prev => ({
+        ...prev,
+        [`${memoryId}_${index}`]: uri
+      }));
+    } catch (error) {
+      console.error('Error generating video thumbnail:', error);
     }
-  }, [albumId]);
+  };
+
+  useEffect(() => {
+    const unsubscribe = subscribeToUserMemories((memoriesList) => {
+      setMemories(memoriesList);
+      
+      // Filter memories based on albumId or date
+      let filtered = memoriesList;
+      
+      if (albumId) {
+        // Filter by album
+        filtered = memoriesList.filter(memory => 
+          memory.albumIds && memory.albumIds.includes(albumId)
+        );
+        setPageTitle("Album Memories");
+      } else if (date) {
+        // Filter by specific date
+        filtered = memoriesList.filter(memory => {
+          if (!memory.date) return false;
+          const memoryDate = new Date(memory.date).toDateString();
+          const targetDate = new Date(date).toDateString();
+          return memoryDate === targetDate;
+        });
+        setPageTitle(title || `Memories from ${new Date(date).toLocaleDateString()}`);
+      } else {
+        setPageTitle("All Memories");
+      }
+      
+      // Generate thumbnails for videos in filtered memories
+      filtered.forEach(memory => {
+        if (memory.videoUrls && memory.videoUrls.length > 0) {
+          memory.videoUrls.forEach((videoUri: string, index: number) => {
+            generateVideoThumbnail(videoUri, memory.id, index);
+          });
+        }
+      });
+      
+      setFilteredMemories(filtered);
+    }, albumId);
+    
+    return () => unsubscribe();
+  }, [albumId, date, title]);
+
+  // Format time ago function
+  const formatTimeAgo = (timestamp: any) => {
+    if (!timestamp) return "Just now";
+    
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    const now = new Date();
+    const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (seconds < 60) return "Just now";
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+    if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`;
+    
+    return date.toLocaleDateString();
+  };
+
+  // Format date for display
+  const formatDisplayDate = (dateString: string) => {
+    if (!dateString) return "No date";
+    
+    try {
+      const date = new Date(dateString);
+      
+      if (isNaN(date.getTime())) {
+        return "Invalid date";
+      }
+      
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    } catch (error) {
+      console.error("Error formatting date:", error);
+      return "Date not available";
+    }
+  };
 
   const pickImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -103,14 +185,13 @@ export default function Memories() {
     }
   };
 
-  // UPDATED: handleSaveMemory function
   const handleSaveMemory = async () => {
     if (!image) {
       Alert.alert("Error", "Please select an image.");
       return;
     }
     
-    if (!title.trim()) {
+    if (!titleInput.trim()) {
       Alert.alert("Error", "Please enter a memory title.");
       return;
     }
@@ -119,15 +200,18 @@ export default function Memories() {
       const localUri = await saveImageLocally(image);
       const formattedDate = memoryDate.toISOString().split('T')[0];
 
+      // If we're in a date-specific view, use that date for the new memory
+      const memoryDateToUse = date ? date : formattedDate;
+
       await createMemory(
-        title.trim(), 
+        titleInput.trim(), 
         description || "", 
         localUri, 
-        albumId || null, 
-        formattedDate
+        albumId ? [albumId] : [],
+        memoryDateToUse
       );
 
-      setTitle("");
+      setTitleInput("");
       setDescription("");
       setImage(null);
       setMemoryDate(new Date());
@@ -140,62 +224,78 @@ export default function Memories() {
     }
   };
 
-  // NEW: Function to handle memory click
+  // Function to handle memory click
   const handleMemoryPress = (memory: any) => {
     setSelectedMemory(memory);
     setShowMemoryDetails(true);
   };
 
-  // UPDATED: renderItem function with click handler
-  // In your renderItem, add extra safety:
-const renderItem = ({ item }: { item: any }) => {
-  // Safety check
-  if (!item) return null;
-  
-  return (
-    <TouchableOpacity 
-      style={styles.imageWrapper}
-      onPress={() => handleMemoryPress(item)}
-    >
-      <Image 
-        source={{ uri: item.imageUrl || '' }} 
-        style={styles.image} 
-      />
-      {item.title ? (
-        <View style={styles.imageOverlay}>
-          <Text style={styles.imageDescription} numberOfLines={2}>
-            {item.title}
-          </Text>
-        </View>
-      ) : null}
-    </TouchableOpacity>
-  );
-};
+  // Handle modal close
+  const handleCloseMemoryModal = () => {
+    setShowMemoryDetails(false);
+    setSelectedMemory(null);
+  };
 
-  // NEW: Format date for display
-  // UPDATED: Fix date formatting function
-const formatDisplayDate = (dateString: string) => {
-  if (!dateString) return "No date";
-  
-  try {
-    // Handle both formats: "2022-10-17" and "2022-10-17T00:00:00.000Z"
-    const date = new Date(dateString);
+  // UPDATED: renderItem function to handle both imageUrl and imageUrls
+  const renderItem = ({ item }: { item: any }) => {
+    if (!item) return null;
     
-    // Check if date is valid
-    if (isNaN(date.getTime())) {
-      return "Invalid date";
-    }
+    // Get display media - prefer first image from array, fallback to single image
+    const displayImage = item.imageUrls?.[0] || item.imageUrl || '';
+    const hasVideos = item.videoUrls && item.videoUrls.length > 0;
+    const videoThumbnail = hasVideos ? videoThumbnails[`${item.id}_0`] : null;
+    const isVideoOnly = !displayImage && hasVideos;
     
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-  } catch (error) {
-    console.error("Error formatting date:", error);
-    return "Date not available";
-  }
-};
+    return (
+      <TouchableOpacity 
+        style={styles.imageWrapper}
+        onPress={() => handleMemoryPress(item)}
+      >
+        {displayImage ? (
+          <Image 
+            source={{ uri: displayImage }} 
+            style={styles.image} 
+          />
+        ) : videoThumbnail ? (
+          <View style={styles.thumbnailContainer}>
+            <Image 
+              source={{ uri: videoThumbnail }} 
+              style={styles.image}
+              resizeMode="cover"
+            />
+            <View style={styles.videoOverlay}>
+              <Icon name="play" size={20} color="#FFFFFF" />
+            </View>
+          </View>
+        ) : isVideoOnly ? (
+          <View style={styles.videoThumbnail}>
+            <Icon name="play-circle-outline" size={32} color="#7C3AED" />
+            <Text style={styles.videoThumbnailText}>Video</Text>
+          </View>
+        ) : (
+          <View style={styles.placeholderThumbnail}>
+            <Icon name="image-off" size={32} color="#9CA3AF" />
+            <Text style={styles.placeholderText}>No media</Text>
+          </View>
+        )}
+        
+        {/* Video indicator badge */}
+        {hasVideos && (
+          <View style={styles.videoBadge}>
+            <Icon name="video" size={12} color="#FFFFFF" />
+          </View>
+        )}
+        
+        {item.title ? (
+          <View style={styles.imageOverlay}>
+            <Text style={styles.imageDescription} numberOfLines={2}>
+              {item.title}
+            </Text>
+          </View>
+        ) : null}
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <>
@@ -203,27 +303,46 @@ const formatDisplayDate = (dateString: string) => {
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-  <TouchableOpacity 
-    style={styles.backButton}
-    onPress={() => router.back()}
-  >
-    <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-  </TouchableOpacity>
-  <Text style={styles.headerTitle}>{albumTitle}</Text> {/* UPDATED: Use dynamic title */}
-  <View style={styles.placeholder} />
-</View>
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => router.back()}
+          >
+            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{pageTitle}</Text>
+          <View style={styles.placeholder} />
+        </View>
 
-<View style={styles.content}>
-  {/* Info Card */}
-  <View style={styles.infoCard}>
-    <Text style={styles.infoTitle}>{albumTitle}</Text> {/* UPDATED: Use dynamic title */}
-    <Text style={styles.infoSubtitle}>
-      {albumId 
-        ? "Memories collected in this album, attached together for a better memory."
-        : "A collection of moments attached together for a better memory, and the feelings those shared."
-      }
-    </Text>
-  </View>
+        <View style={styles.content}>
+          {/* Info Card */}
+          <View style={styles.infoCard}>
+            <Text style={styles.infoTitle}>{pageTitle}</Text>
+            <Text style={styles.infoSubtitle}>
+              {albumId 
+                ? "Memories collected in this album, attached together for a better memory."
+                : date
+                ? `Memories from ${new Date(date).toLocaleDateString('en-US', { 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}`
+                : "A collection of moments attached together for a better memory, and the feelings those shared."
+              }
+            </Text>
+            {date && (
+              <View style={styles.dateBadge}>
+                <Icon name="calendar" size={14} color="#7C3AED" />
+                <Text style={styles.dateBadgeText}>
+                  {new Date(date).toLocaleDateString('en-US', { 
+                    weekday: 'long',
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}
+                </Text>
+              </View>
+            )}
+          </View>
 
           {/* Add Memory Button */}
           <TouchableOpacity 
@@ -235,17 +354,22 @@ const formatDisplayDate = (dateString: string) => {
           </TouchableOpacity>
 
           {/* Memories Grid */}
-          {memories.length === 0 ? (
+          {filteredMemories.length === 0 ? (
             <View style={styles.emptyState}>
               <Icon name="image-outline" size={64} color="#D1D5DB" />
               <Text style={styles.emptyTitle}>No memories yet</Text>
               <Text style={styles.emptySubtitle}>
-                Add your first memory to start your collection
+                {date 
+                  ? `No memories for ${new Date(date).toLocaleDateString()}`
+                  : albumId
+                  ? "No memories in this album yet"
+                  : "Add your first memory to start your collection"
+                }
               </Text>
             </View>
           ) : (
             <FlatList
-              data={memories}
+              data={filteredMemories}
               renderItem={renderItem}
               keyExtractor={(item) => item.id}
               numColumns={numColumns}
@@ -274,7 +398,7 @@ const formatDisplayDate = (dateString: string) => {
                   onPress={() => {
                     setShowForm(false);
                     setImage(null);
-                    setTitle("");
+                    setTitleInput("");
                     setDescription("");
                     setMemoryDate(new Date());
                   }}
@@ -302,24 +426,26 @@ const formatDisplayDate = (dateString: string) => {
                   style={styles.input}
                   placeholder="Give your memory a title"
                   placeholderTextColor="#9CA3AF"
-                  value={title}
-                  onChangeText={setTitle}
+                  value={titleInput}
+                  onChangeText={setTitleInput}
                 />
               </View>
 
-              {/* Date Picker */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>When did this happen?</Text>
-                <TouchableOpacity 
-                  style={styles.datePickerButton}
-                  onPress={() => setShowDatePicker(true)}
-                >
-                  <Text style={styles.datePickerText}>
-                    {memoryDate.toLocaleDateString()}
-                  </Text>
-                  <Icon name="calendar" size={20} color="#6B7280" />
-                </TouchableOpacity>
-              </View>
+              {/* Date Picker - Hide if we're in date-specific view */}
+              {!date && (
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>When did this happen?</Text>
+                  <TouchableOpacity 
+                    style={styles.datePickerButton}
+                    onPress={() => setShowDatePicker(true)}
+                  >
+                    <Text style={styles.datePickerText}>
+                      {memoryDate.toLocaleDateString()}
+                    </Text>
+                    <Icon name="calendar" size={20} color="#6B7280" />
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {/* Description Input */}
               <View style={styles.inputGroup}>
@@ -345,7 +471,7 @@ const formatDisplayDate = (dateString: string) => {
                 onPress={() => {
                   setShowForm(false);
                   setImage(null);
-                  setTitle("");
+                  setTitleInput("");
                   setDescription("");
                   setMemoryDate(new Date());
                 }}
@@ -381,67 +507,14 @@ const formatDisplayDate = (dateString: string) => {
           </View>
         </Modal>
 
-        {/* NEW: Memory Details Modal */}
-        <Modal visible={showMemoryDetails} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalContent, styles.detailModalContent]}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Memory Details</Text>
-                <TouchableOpacity
-                  onPress={() => setShowMemoryDetails(false)}
-                >
-                  <Icon name="close" size={24} color="#6B7280" />
-                </TouchableOpacity>
-              </View>
-
-              {selectedMemory && (
-                <>
-                  {/* Memory Image */}
-                  <Image 
-                    source={{ uri: selectedMemory.imageUrl }} 
-                    style={styles.detailImage}
-                    resizeMode="cover"
-                  />
-                  
-                  {/* Memory Title */}
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Title</Text>
-                    <Text style={styles.detailTitle}>{selectedMemory.title}</Text>
-                  </View>
-
-                  {/* Memory Date */}
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Date</Text>
-                    <View style={styles.dateRow}>
-                      <Icon name="calendar" size={16} color="#6B7280" />
-                      <Text style={styles.detailDate}>
-                        {formatDisplayDate(selectedMemory.date)}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Memory Description */}
-                  {selectedMemory.description && (
-                    <View style={styles.detailSection}>
-                      <Text style={styles.detailLabel}>Description</Text>
-                      <Text style={styles.detailDescription}>
-                        {selectedMemory.description}
-                      </Text>
-                    </View>
-                  )}
-
-                  {/* Close Button */}
-                  <TouchableOpacity 
-                    style={styles.closeDetailButton} 
-                    onPress={() => setShowMemoryDetails(false)}
-                  >
-                    <Text style={styles.closeDetailText}>Close</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          </View>
-        </Modal>
+        {/* Memory Modal */}
+        <MemoryModal
+          visible={showMemoryDetails}
+          memory={selectedMemory}
+          onClose={handleCloseMemoryModal}
+          formatDisplayDate={formatDisplayDate}
+          formatTimeAgo={formatTimeAgo}
+        />
       </View>
     </>
   );
@@ -500,6 +573,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#6B7280",
     lineHeight: 20,
+    marginBottom: 8,
+  },
+  dateBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EDE9FE",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    alignSelf: 'flex-start',
+    gap: 6,
+  },
+  dateBadgeText: {
+    fontSize: 12,
+    color: "#7C3AED",
+    fontWeight: "600",
   },
   addButton: {
     backgroundColor: "#7C3AED",
@@ -611,61 +700,6 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
-  // NEW: Detail modal specific styles
-  detailModalContent: {
-    maxHeight: '80%',
-  },
-  detailImage: {
-    width: '100%',
-    height: 250,
-    borderRadius: 12,
-    marginBottom: 20,
-  },
-  detailSection: {
-    marginBottom: 20,
-  },
-  detailLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#6B7280",
-    marginBottom: 8,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  detailTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#111827",
-    lineHeight: 28,
-  },
-  dateRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  detailDate: {
-    fontSize: 16,
-    color: "#7C3AED",
-    fontWeight: "600",
-  },
-  detailDescription: {
-    fontSize: 16,
-    color: "#374151",
-    lineHeight: 24,
-  },
-  closeDetailButton: {
-    backgroundColor: "#7C3AED",
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: "center",
-    marginTop: 8,
-  },
-  closeDetailText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  // Existing styles...
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -794,5 +828,56 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     fontSize: 16,
     fontWeight: "600",
+  },
+  videoThumbnail: {
+    width: imageSize,
+    height: imageSize,
+    backgroundColor: "#F3F4F6",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  videoThumbnailText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: "#7C3AED",
+    fontWeight: "600",
+  },
+  placeholderThumbnail: {
+    width: imageSize,
+    height: imageSize,
+    backgroundColor: "#F3F4F6",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  placeholderText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: "#9CA3AF",
+  },
+  videoBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+   thumbnailContainer: {
+    position: 'relative',
+    width: imageSize,
+    height: imageSize,
+  },
+  videoOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    justifyContent: "center",
+    alignItems: "center",
   },
 });

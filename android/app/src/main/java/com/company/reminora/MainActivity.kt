@@ -1,4 +1,4 @@
-package com.company.expo
+package com.company.reminora
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

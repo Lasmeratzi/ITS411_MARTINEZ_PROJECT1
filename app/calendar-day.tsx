@@ -2,19 +2,20 @@ import auth from "@react-native-firebase/auth";
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from "expo-router";
+import * as VideoThumbnails from 'expo-video-thumbnails';
 import React, { useEffect, useState } from "react";
 import {
-    Alert, Image, Modal, ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  Alert, Image, Modal, ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from "react-native";
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { createCalendarAlbum } from "../services/albumsService"; // UPDATED: Import calendar album function
+import AlbumModal from "../modals/AlbumModal";
+import { createCalendarAlbum } from "../services/albumsService";
 import { createCalendarMemory, subscribeToUserMemories } from "../services/memoriesService";
 
 // NEW: Color options for albums
@@ -38,12 +39,14 @@ export default function CalendarDay() {
   const [memories, setMemories] = useState<any[]>([]);
   const [selectedMemory, setSelectedMemory] = useState<any>(null);
   const [showMemoryDetails, setShowMemoryDetails] = useState(false);
+  const [videoThumbnails, setVideoThumbnails] = useState<{[key: string]: string}>({});
   
   // NEW: State for album creation
   const [showAlbumForm, setShowAlbumForm] = useState(false);
   const [albumTitle, setAlbumTitle] = useState("");
   const [albumDescription, setAlbumDescription] = useState("");
   const [selectedColor, setSelectedColor] = useState(COLOR_OPTIONS[0]);
+  const [albumCoverImage, setAlbumCoverImage] = useState<string | null>(null);
 
   useEffect(() => {
     if (date) {
@@ -59,6 +62,21 @@ export default function CalendarDay() {
     }
   }, [date]);
 
+  // Function to generate video thumbnail
+  const generateVideoThumbnail = async (videoUri: string, memoryId: string, index: number = 0) => {
+    try {
+      const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, {
+        time: 1000, // 1 second into the video
+      });
+      setVideoThumbnails(prev => ({
+        ...prev,
+        [`${memoryId}_${index}`]: uri
+      }));
+    } catch (error) {
+      console.error('Error generating video thumbnail:', error);
+    }
+  };
+
   useEffect(() => {
     // Load memories for this date
     const unsubscribe = subscribeToUserMemories((memoriesList) => {
@@ -67,6 +85,16 @@ export default function CalendarDay() {
         const memoryDate = new Date(memory.date).toDateString();
         return memoryDate === selectedDate.toDateString();
       });
+      
+      // Generate thumbnails for videos
+      dateMemories.forEach(memory => {
+        if (memory.videoUrls && memory.videoUrls.length > 0) {
+          memory.videoUrls.forEach((videoUri: string, index: number) => {
+            generateVideoThumbnail(videoUri, memory.id, index);
+          });
+        }
+      });
+      
       setMemories(dateMemories);
     });
     return () => unsubscribe();
@@ -117,13 +145,15 @@ export default function CalendarDay() {
         title,
         formattedDate,
         albumDescription.trim(),
-        selectedColor
+        selectedColor,
+        albumCoverImage
       );
       
       // Reset form and close modal
       setAlbumTitle("");
       setAlbumDescription("");
       setSelectedColor(COLOR_OPTIONS[0]);
+      setAlbumCoverImage(null);
       setShowAlbumForm(false);
       
       Alert.alert("Success", "Calendar album created for this date!");
@@ -171,7 +201,8 @@ export default function CalendarDay() {
           `Memory from ${formatDate(selectedDate)}`,
           "",
           localUri,
-          selectedDate // Pass the Date object directly
+          selectedDate,
+          [] // Empty array - memory goes only to auto month/year albums
         );
 
         Alert.alert("Success", "Memory added for this date!");
@@ -181,12 +212,29 @@ export default function CalendarDay() {
     }
   };
 
+  // FIXED: Navigate to memories filtered by this specific date
   const navigateToMemories = () => {
-    router.push("/memories");
+    const formattedDate = formatDateForAlbum(selectedDate);
+    router.push({
+      pathname: "/memories",
+      params: { 
+        date: formattedDate,
+        title: `Memories from ${formatDate(selectedDate)}`
+      }
+    });
   };
 
   const navigateToAlbums = () => {
     router.push("/albums");
+  };
+
+  // Handle modal close
+  const handleCloseAlbumModal = () => {
+    setShowAlbumForm(false);
+    setAlbumTitle("");
+    setAlbumDescription("");
+    setSelectedColor(COLOR_OPTIONS[0]);
+    setAlbumCoverImage(null);
   };
 
   return (
@@ -220,7 +268,7 @@ export default function CalendarDay() {
             
             <TouchableOpacity 
               style={styles.actionCard}
-              onPress={() => setShowAlbumForm(true)} // UPDATED: Open form instead of direct creation
+              onPress={() => setShowAlbumForm(true)}
             >
               <View style={[styles.actionIcon, { backgroundColor: "#EDE9FE" }]}>
                 <Icon name="book-plus" size={24} color="#7C3AED" />
@@ -278,25 +326,63 @@ export default function CalendarDay() {
                 showsHorizontalScrollIndicator={false}
                 style={styles.memoriesScroll}
               >
-                {memories.slice(0, 5).map((memory) => (
-                  <TouchableOpacity 
-                    key={memory.id}
-                    style={styles.memoryThumbnail}
-                    onPress={() => {
-                      setSelectedMemory(memory);
-                      setShowMemoryDetails(true);
-                    }}
-                  >
-                    <Image 
-                      source={{ uri: memory.imageUrl }} 
-                      style={styles.thumbnailImage}
-                      resizeMode="cover"
-                    />
-                    <Text style={styles.memoryTitle} numberOfLines={2}>
-                      {memory.title || "Untitled memory"}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                {memories.slice(0, 5).map((memory) => {
+                  // Get the first available image or video thumbnail
+                  const displayImage = memory.imageUrls?.[0] || memory.imageUrl;
+                  const hasVideos = memory.videoUrls && memory.videoUrls.length > 0;
+                  const videoThumbnail = hasVideos ? videoThumbnails[`${memory.id}_0`] : null;
+                  const isVideoOnly = !displayImage && hasVideos;
+                  
+                  return (
+                    <TouchableOpacity 
+                      key={memory.id}
+                      style={styles.memoryThumbnail}
+                      onPress={() => {
+                        setSelectedMemory(memory);
+                        setShowMemoryDetails(true);
+                      }}
+                    >
+                      {displayImage ? (
+                        <Image 
+                          source={{ uri: displayImage }} 
+                          style={styles.thumbnailImage}
+                          resizeMode="cover"
+                        />
+                      ) : videoThumbnail ? (
+                        <View style={styles.thumbnailContainer}>
+                          <Image 
+                            source={{ uri: videoThumbnail }} 
+                            style={styles.thumbnailImage}
+                            resizeMode="cover"
+                          />
+                          <View style={styles.videoOverlay}>
+                            <Icon name="play" size={20} color="#FFFFFF" />
+                          </View>
+                        </View>
+                      ) : isVideoOnly ? (
+                        <View style={styles.videoPlaceholder}>
+                          <Icon name="play-circle-outline" size={24} color="#7C3AED" />
+                          <Text style={styles.videoPlaceholderText}>Video</Text>
+                        </View>
+                      ) : (
+                        <View style={styles.thumbnailPlaceholder}>
+                          <Icon name="image-outline" size={24} color="#9CA3AF" />
+                        </View>
+                      )}
+                      
+                      {/* Video indicator badge */}
+                      {hasVideos && (
+                        <View style={styles.videoBadge}>
+                          <Icon name="video" size={10} color="#FFFFFF" />
+                        </View>
+                      )}
+                      
+                      <Text style={styles.memoryTitle} numberOfLines={2}>
+                        {memory.title || "Untitled memory"}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             )}
           </View>
@@ -356,11 +442,18 @@ export default function CalendarDay() {
               {selectedMemory && (
                 <>
                   {/* Memory Image */}
-                  <Image 
-                    source={{ uri: selectedMemory.imageUrl }} 
-                    style={styles.detailImage}
-                    resizeMode="cover"
-                  />
+                  {selectedMemory.imageUrls?.[0] || selectedMemory.imageUrl ? (
+                    <Image 
+                      source={{ uri: selectedMemory.imageUrls?.[0] || selectedMemory.imageUrl }} 
+                      style={styles.detailImage}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={styles.noImagePlaceholder}>
+                      <Icon name="image-off" size={64} color="#9CA3AF" />
+                      <Text style={styles.noImageText}>No Image</Text>
+                    </View>
+                  )}
                   
                   {/* Memory Title */}
                   <View style={styles.detailSection}>
@@ -402,101 +495,22 @@ export default function CalendarDay() {
           </View>
         </Modal>
 
-        {/* NEW: Album Creation Modal */}
-        <Modal visible={showAlbumForm} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Create Calendar Album</Text>
-                <TouchableOpacity
-                  onPress={() => {
-                    setShowAlbumForm(false);
-                    setAlbumTitle("");
-                    setAlbumDescription("");
-                    setSelectedColor(COLOR_OPTIONS[0]);
-                  }}
-                >
-                  <Icon name="close" size={24} color="#6B7280" />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Album Title</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder={`Memories from ${formatDate(selectedDate)}`}
-                  placeholderTextColor="#9CA3AF"
-                  value={albumTitle}
-                  onChangeText={setAlbumTitle}
-                />
-              </View>
-
-              {/* Description Input */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Description (Optional)</Text>
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  placeholder="Enter album description"
-                  placeholderTextColor="#9CA3AF"
-                  value={albumDescription}
-                  onChangeText={setAlbumDescription}
-                  multiline
-                  numberOfLines={3}
-                  textAlignVertical="top"
-                />
-              </View>
-
-              {/* Color Picker */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Album Color</Text>
-                <View style={styles.colorGrid}>
-                  {COLOR_OPTIONS.map((color) => (
-                    <TouchableOpacity
-                      key={color}
-                      style={[
-                        styles.colorOption,
-                        { backgroundColor: color },
-                        selectedColor === color && styles.colorOptionSelected,
-                      ]}
-                      onPress={() => setSelectedColor(color)}
-                    >
-                      {selectedColor === color && (
-                        <Icon name="check" size={16} color="#FFFFFF" />
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-
-              {/* Date Display (Read-only) */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Album Date</Text>
-                <View style={styles.dateDisplay}>
-                  <Text style={styles.dateDisplayText}>{formatDate(selectedDate)}</Text>
-                </View>
-                <Text style={styles.dateHelperText}>
-                  This album will be linked to {selectedDate.toLocaleDateString()}
-                </Text>
-              </View>
-
-              <TouchableOpacity style={styles.submitButton} onPress={handleCreateAlbum}>
-                <Text style={styles.submitButtonText}>Create Calendar Album</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.cancelModalButton}
-                onPress={() => {
-                  setShowAlbumForm(false);
-                  setAlbumTitle("");
-                  setAlbumDescription("");
-                  setSelectedColor(COLOR_OPTIONS[0]);
-                }}
-              >
-                <Text style={styles.cancelModalText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
+        {/* Album Modal */}
+        <AlbumModal
+          visible={showAlbumForm}
+          albumTitle={albumTitle}
+          albumDescription={albumDescription}
+          selectedColor={selectedColor}
+          albumDate={selectedDate}
+          albumCoverImage={albumCoverImage}
+          onAlbumTitleChange={setAlbumTitle}
+          onAlbumDescriptionChange={setAlbumDescription}
+          onColorSelect={setSelectedColor}
+          onDateChange={() => {}} // Empty function since date is fixed for calendar albums
+          onCoverImageChange={setAlbumCoverImage}
+          onSubmit={handleCreateAlbum}
+          onClose={handleCloseAlbumModal}
+        />
       </View>
     </>
   );
@@ -657,6 +671,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
+    position: 'relative',
+  },
+  thumbnailContainer: {
+    position: 'relative',
   },
   thumbnailImage: {
     width: "100%",
@@ -664,6 +682,43 @@ const styles = StyleSheet.create({
     backgroundColor: "#F3F4F6",
     borderRadius: 8,
     marginBottom: 8,
+  },
+  videoOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 8,
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  videoPlaceholder: {
+    width: "100%",
+    height: 80,
+    backgroundColor: "#F3F4F6",
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  videoPlaceholderText: {
+    marginTop: 4,
+    fontSize: 10,
+    color: "#7C3AED",
+    fontWeight: "500",
+  },
+  videoBadge: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: "center",
+    alignItems: "center",
   },
   memoryTitle: {
     fontSize: 12,
@@ -786,94 +841,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
-  // NEW: Album Form Styles
-  inputGroup: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#374151",
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: "#F9FAFB",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 15,
-    color: "#111827",
-  },
-  textArea: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  colorGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 8,
-  },
-  colorOption: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  thumbnailPlaceholder: {
+    width: "100%",
+    height: 80,
+    backgroundColor: "#F3F4F6",
+    borderRadius: 8,
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: "transparent",
+    marginBottom: 8,
   },
-  colorOptionSelected: {
-    borderColor: "#111827",
-    transform: [{ scale: 1.1 }],
-  },
-  dateDisplay: {
+  noImagePlaceholder: {
+    width: '100%',
+    height: 200,
     backgroundColor: "#F3F4F6",
     borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  dateDisplayText: {
-    fontSize: 15,
-    color: "#111827",
-    fontWeight: "500",
-  },
-  dateHelperText: {
-    fontSize: 12,
-    color: "#6B7280",
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
-  submitButton: {
-    backgroundColor: "#7C3AED",
-    borderRadius: 12,
-    paddingVertical: 16,
+    justifyContent: "center",
     alignItems: "center",
+    marginBottom: 20,
+  },
+  noImageText: {
     marginTop: 8,
-    shadowColor: "#7C3AED",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  submitButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  cancelModalButton: {
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginTop: 12,
-  },
-  cancelModalText: {
-    color: "#6B7280",
-    fontSize: 16,
-    fontWeight: "600",
+    fontSize: 14,
+    color: "#9CA3AF",
   },
 });
